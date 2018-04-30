@@ -1,0 +1,11 @@
+[package]
+name = "meldnafen"
+version = "0.1.0"
+authors = ["Cecile Tonglet <cecile.tonglet@gmail.com>"]
+build = "build.rs"
+
+[dependencies]
+sdl2 = { version = "0.31", features = ["image", "unsafe_textures"] }
+log = "0.4"
+env_logger = "0.5.9"
+num-traits = "0.2"
