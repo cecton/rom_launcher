@@ -7,8 +7,7 @@ use sdl2::keyboard::Keycode;
 use num_traits::cast::ToPrimitive;
 
 use app::App;
-use store::Store;
-use actions::Action;
+use store::{Store, Action};
 
 const CHARS: [char; 81] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',

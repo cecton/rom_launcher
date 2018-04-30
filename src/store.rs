@@ -1,7 +1,25 @@
-use state::{State, INITIAL_STATE};
-use actions::Action;
-use reducer::reduce;
+/// The state of the application
+#[derive(Clone, PartialEq, Debug)]
+pub struct State {
+    x: u32,
+}
 
+const INITIAL_STATE: State = State { x: 0 };
+
+/// An Enum of all the possible actions in the application
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum Action {
+    Initialize {},
+}
+
+/// Reducer
+fn reduce(state: &State, ref action: Action) -> State {
+    let mut new_state = state.clone();
+    new_state.x = 1;
+    return new_state;
+}
+
+/// Store
 pub struct Store {
     state: State,
 }
