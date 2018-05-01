@@ -1,4 +1,5 @@
 extern crate env_logger;
+extern crate id_tree;
 #[macro_use]
 extern crate log;
 extern crate num_traits;
@@ -37,16 +38,14 @@ pub fn main() {
     debug!("looping over events...");
     let mut event_pump = sdl_context.event_pump().unwrap();
     'running: for event in event_pump.wait_iter() {
-        if meldnafen.running {
-            let rerender = meldnafen.apply_event(event);
+        let rerender = meldnafen.apply_event(event);
 
-            if !meldnafen.running {
-                break 'running;
-            }
+        if !meldnafen.app.is_running() {
+            break 'running;
+        }
 
-            if rerender {
-                meldnafen.render();
-            }
+        if rerender {
+            meldnafen.render();
         }
     }
 

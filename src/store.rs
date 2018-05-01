@@ -7,13 +7,13 @@ pub struct State {
 const INITIAL_STATE: State = State { x: 0 };
 
 /// An Enum of all the possible actions in the application
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Action {
     Initialize {},
 }
 
 /// Reducer
-fn reduce(state: &State, ref action: Action) -> State {
+fn reduce(state: &State, action: &Action) -> State {
     let mut new_state = state.clone();
     new_state.x = 1;
     return new_state;
@@ -35,7 +35,7 @@ impl Store {
     pub fn dispatch(&mut self, action: Action) -> Action {
         debug!("dispatch action {:?}", action);
 
-        let new_state = reduce(&self.state, action);
+        let new_state = reduce(&self.state, &action);
         if self.state == new_state {
             debug!("state untouched");
         } else {
@@ -44,5 +44,9 @@ impl Store {
         }
 
         return action;
+    }
+
+    pub fn get_state(&self) -> &State {
+        return &self.state;
     }
 }
