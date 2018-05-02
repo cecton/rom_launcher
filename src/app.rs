@@ -19,7 +19,7 @@ impl App {
         };
     }
 
-    pub fn load_texture(&mut self, filepath: &str) -> Texture {
+    pub fn load_texture(&self, filepath: &str) -> Texture {
         return self.texture_creator
             .load_texture(filepath)
             .expect(format!("Couldn't load texture file: {}", filepath).as_ref());

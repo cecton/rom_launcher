@@ -12,6 +12,7 @@ extern crate sdl2;
 mod app;
 mod meldnafen;
 mod store;
+mod draw;
 
 pub fn main() {
     let mut builder = Builder::from_default_env();
