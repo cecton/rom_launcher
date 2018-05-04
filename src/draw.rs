@@ -8,6 +8,9 @@ pub struct Font {
     chars: Vec<char>,
     width: u32,
     height: u32,
+    x: i32,
+    y: i32,
+    line_spacing: f32,
 }
 
 impl Font {
@@ -22,13 +25,25 @@ impl Font {
             chars,
             width,
             height,
+            x: 0,
+            y: 0,
+            line_spacing: 1.0,
         }
     }
 
+    pub fn set_pos(&mut self, x: i32, y: i32) {
+        self.x = x;
+        self.y = y;
+    }
+
+    pub fn set_line_spacing(&mut self, line_spacing: f32) {
+        self.line_spacing = line_spacing;
+    }
+
     #[allow(unused_must_use)]
-    pub fn print(&self, canvas: &mut Canvas<Window>, x: i32, y: i32, text: &str) {
+    fn _write(&self, canvas: &mut Canvas<Window>, text: &str) -> (i32, i32) {
         let mut src = Rect::new(0, 0, self.width, self.height);
-        let mut dst = Rect::new(x, y, self.width, self.height);
+        let mut dst = Rect::new(self.x, self.y, self.width, self.height);
         let font_width = self.width.to_i32().unwrap();
         for c in text.chars() {
             match self.chars.iter().enumerate().find(|&(_, x)| x == &c) {
@@ -41,5 +56,21 @@ impl Font {
                 _ => {}
             }
         }
+
+        (dst.left(), dst.top())
+    }
+
+    pub fn print(&mut self, canvas: &mut Canvas<Window>, text: &str) {
+        let (x, y) = self._write(canvas, text);
+        self.x = x;
+        self.y = y;
+    }
+
+    pub fn println(&mut self, canvas: &mut Canvas<Window>, text: &str) {
+        let (_, y) = self._write(canvas, text);
+        self.y = y
+            + (self.height.to_f32().unwrap() * self.line_spacing)
+                .to_i32()
+                .unwrap();
     }
 }

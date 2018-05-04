@@ -11,7 +11,7 @@ use store::{Action, State, Store};
 use draw::Font;
 
 trait Entity {
-    fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &Resources);
+    fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources);
     fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool;
 }
 
@@ -20,12 +20,16 @@ struct List {}
 
 impl Entity for List {
     #[allow(unused_must_use)]
-    fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &Resources) {
+    fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
         canvas.set_draw_color(Color::RGB(255, 0, 0));
-        canvas.draw_rect(Rect::new(0, 0, 10, 10));
-        resources.font.print(canvas, 16, 16, "Hello World!");
+        canvas.draw_rect(Rect::new(6, 15, 15, 15));
+        resources.font.set_line_spacing(0.75);
+        resources.font.set_pos(15, 15);
+        resources.font.print(canvas, "Hello");
+        resources.font.println(canvas, " World!");
+        resources.font.println(canvas, "Hello World!");
     }
 
     fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
@@ -60,7 +64,7 @@ impl Meldnafen {
         let mut app = App::new(canvas);
         let mut store = Store::new();
         store.dispatch(Action::Initialize {});
-        debug!("setting up canvas and loading resources...");
+        debug!("setting up canvas...");
         app.canvas.set_scale(3.0, 3.0).unwrap();
 
         let resources = Self::load_resources(&app);
@@ -75,6 +79,7 @@ impl Meldnafen {
     }
 
     fn load_resources(app: &App) -> Resources {
+        debug!("loading resources...");
         let font = Font::new(
             app.load_texture("font-12.png"),
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!?()[]<>~-_+@:/'., ",
@@ -99,7 +104,7 @@ impl Meldnafen {
             node.data().render(
                 &mut self.app.canvas,
                 self.store.get_state(),
-                &self.resources,
+                &mut self.resources,
             );
         }
 
