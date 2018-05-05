@@ -24,7 +24,7 @@ pub fn main() {
     let video_subsystem = sdl_context.video().unwrap();
     let _image_context = sdl2::image::init(sdl2::image::INIT_PNG).unwrap();
     let window = video_subsystem
-        .window("meldnafen", 800, 600)
+        .window("meldnafen", 800, 700)
         .position(0, 0)
         .borderless()
         .build()

@@ -4,10 +4,10 @@ use sdl2::rect::Rect;
 use num_traits::cast::ToPrimitive;
 
 pub struct Font {
-    texture: Texture,
+    pub texture: Texture,
     chars: Vec<char>,
-    width: u32,
-    height: u32,
+    w: i32,
+    h: i32,
     x: i32,
     y: i32,
     line_spacing: f32,
@@ -17,14 +17,14 @@ impl Font {
     pub fn new(texture: Texture, string_chars: &str) -> Font {
         let chars: Vec<char> = string_chars.chars().collect();
         let query = texture.query();
-        let width = query.width / chars.len().to_u32().unwrap();
-        let height = query.height;
+        let w = query.width as i32 / chars.len() as i32;
+        let h = query.height as i32;
 
         Font {
             texture,
             chars,
-            width,
-            height,
+            w,
+            h,
             x: 0,
             y: 0,
             line_spacing: 1.0,
@@ -41,35 +41,46 @@ impl Font {
     }
 
     #[allow(unused_must_use)]
-    fn _write(&self, canvas: &mut Canvas<Window>, text: &str) -> (i32, i32) {
-        let mut src = Rect::new(0, 0, self.width, self.height);
-        let mut dst = Rect::new(self.x, self.y, self.width, self.height);
-        let font_width = self.width.to_i32().unwrap();
+    fn _print(&self, canvas: &mut Canvas<Window>, text: &str) -> (i32, i32) {
+        let mut src = Rect::new(0, 0, self.w as u32, self.h as u32);
+        let mut dst = Rect::new(self.x, self.y, self.w as u32, self.h as u32);
         for c in text.chars() {
             match self.chars.iter().enumerate().find(|&(_, x)| x == &c) {
                 Some((i, _)) => {
-                    src.set_x(i.to_i32().unwrap() * font_width);
+                    src.set_x(i as i32 * self.w);
                     canvas.copy(&self.texture, src, dst);
                     let left = dst.left();
-                    dst.set_x(left + font_width);
+                    dst.set_x(left + self.w);
                 }
-                _ => {}
+                None => {
+                    if c == '\n' {
+                        dst.set_x(self.x);
+                        dst.set_y(
+                            self.y
+                                + (self.h.to_f32().unwrap() * self.line_spacing)
+                                    .to_i32()
+                                    .unwrap(),
+                        );
+                    }
+                }
             }
         }
 
         (dst.left(), dst.top())
     }
 
+    #[allow(dead_code)]
     pub fn print(&mut self, canvas: &mut Canvas<Window>, text: &str) {
-        let (x, y) = self._write(canvas, text);
+        let (x, y) = self._print(canvas, text);
         self.x = x;
         self.y = y;
     }
 
+    #[allow(dead_code)]
     pub fn println(&mut self, canvas: &mut Canvas<Window>, text: &str) {
-        let (_, y) = self._write(canvas, text);
+        let (_, y) = self._print(canvas, text);
         self.y = y
-            + (self.height.to_f32().unwrap() * self.line_spacing)
+            + (self.h.to_f32().unwrap() * self.line_spacing)
                 .to_i32()
                 .unwrap();
     }
