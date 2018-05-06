@@ -1,108 +1,227 @@
+use std::cmp;
+use std::fs;
+use std::env;
+use std::error::Error;
+use bincode::{deserialize, serialize, ErrorKind};
+
 /// The state of the application
-#[derive(Clone, PartialEq, Debug)]
-pub struct State<'a> {
-    pub emulator: &'a Emulator,
-    pub roms: Vec<String>,
-}
-
 #[derive(Debug)]
-pub struct Emulator {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub path: &'static str,
+pub struct State {
+    pub emulator_selected: i32,
+    pub emulators: Vec<Emulator>,
+    pub roms: Result<Vec<Rom>, String>,
+    pub rom_selected: i32,
 }
 
-impl PartialEq for Emulator {
-    fn eq(&self, other: &Emulator) -> bool {
-        return self.id == other.id;
+impl State {
+    pub fn get_emulator(&self) -> &Emulator {
+        &self.emulators[self.emulator_selected as usize]
     }
 }
 
-static PC_ENGINE: Emulator = Emulator {
-    id: "pce",
-    name: "PC Engine",
-    path: "~/pce_roms",
-};
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SaveState {
+    pub emulator_selected: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct Emulator {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+}
 
 /// An Enum of all the possible actions in the application
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Debug)]
 pub enum Action {
-    Initialize {},
-    LoadRoms { roms: Vec<String> },
+    Initialize(SaveState),
+    LoadRoms { roms: Result<Vec<Rom>, String> },
+    NextRom { step: i32 },
+    NextEmulator { step: i32 },
 }
 
 /// Reducer
-fn reduce<'a>(state: &State<'a>, action: Action) -> Option<State<'a>> {
+#[allow(unreachable_patterns)]
+fn reduce(state: State, action: Action) -> State {
     match action {
-        Action::LoadRoms { roms } => {
-            let mut new_state = State { roms, ..*state };
-            Some(new_state)
+        Action::Initialize(save_state) => State {
+            emulator_selected: save_state.emulator_selected,
+            ..state
+        },
+        Action::LoadRoms { roms } => State {
+            roms: roms,
+            ..state
+        },
+        Action::NextRom { step } => {
+            if state.roms.is_err() {
+                return state;
+            }
+
+            let max = state.roms.as_ref().unwrap().len() as i32 - 1;
+            let rom_selected = cmp::min(cmp::max(state.rom_selected + step, -1), max);
+
+            State {
+                rom_selected,
+                ..state
+            }
         }
-        _ => None,
+        Action::NextEmulator { step } => {
+            let max = state.emulators.len() as i32 - 1;
+            let mut emulator_selected = state.emulator_selected + step;
+            if emulator_selected < 0 {
+                emulator_selected = max;
+            } else if emulator_selected > max {
+                emulator_selected = 0;
+            }
+
+            State {
+                emulator_selected,
+                ..state
+            }
+        }
+        _ => state,
     }
 }
 
 /// Store
-type Middleware = Fn(Action) -> Vec<Action>;
-
-pub struct Store<'a> {
-    state: State<'a>,
-    middlewares: Vec<Box<Middleware>>,
+pub struct Store {
+    state: Option<State>,
+    queue: Vec<StoreAction>,
 }
 
-impl<'a> Store<'a> {
-    pub fn new(middlewares: Vec<Box<Middleware>>) -> Store<'a> {
+enum StoreAction {
+    Simple(Action),
+    Thunk(Box<Fn(&mut Store)>),
+}
+
+impl Store {
+    pub fn new() -> Store {
         let state = Self::get_initial_state();
         debug!("initial state: {:?}", state);
 
-        Store { state, middlewares }
+        Store {
+            state: Some(state),
+            queue: vec![],
+        }
     }
 
-    fn get_initial_state() -> State<'a> {
+    fn get_initial_state() -> State {
+        let emulators = vec![
+            Emulator {
+                id: "pce".to_string(),
+                name: "PC Engine".to_string(),
+                path: "~/pce_roms".to_string(),
+            },
+            Emulator {
+                id: "md".to_string(),
+                name: "Mega Drive".to_string(),
+                path: "~/md_roms".to_string(),
+            },
+        ];
+
         State {
-            emulator: &PC_ENGINE,
-            roms: vec![],
+            emulators,
+            emulator_selected: 0,
+            roms: Ok(vec![]),
+            rom_selected: -1,
         }
     }
 
-    pub fn dispatch(&mut self, action: Action) -> Vec<Action> {
-        let mut actions = vec![action];
+    pub fn dispatch(&mut self, action: Action) {
+        debug!("enqueuing action: {:?}", action);
+        self.queue.push(StoreAction::Simple(action));
+    }
 
-        debug!("apply middlewares");
-        for middleware in &self.middlewares {
-            for action in actions.clone() {
-                actions = middleware(action);
-            }
-        }
+    pub fn dispatch_thunk(&mut self, f: Box<Fn(&mut Store)>) {
+        debug!("enqueuing thunk action");
+        self.queue.push(StoreAction::Thunk(f));
+    }
 
-        debug!("dispatch actions: {:?}", actions);
-        for action in actions.clone() {
-            match reduce(&self.state, action) {
-                Some(state) => {
-                    debug!("{:?}", state);
-                    self.state = state
+    pub fn process(&mut self) {
+        let todo: Vec<_> = self.queue.drain(..).collect();
+
+        for action in todo {
+            match action {
+                StoreAction::Simple(action) => {
+                    let mut action = Some(action);
+
+                    debug!("applying middlewares");
+                    action = trigger_middleware(self, action.unwrap());
+
+                    if let Some(x) = action {
+                        debug!("dispatching action: {:?}", x);
+                        let mut state = self.state.take().unwrap();
+                        state = reduce(state, x);
+                        debug!("{:?}", state);
+                        self.state = Some(state);
+                    }
                 }
-                None => debug!("state untouched"),
+                StoreAction::Thunk(f) => f(self),
             }
         }
 
-        return actions;
+        if !self.queue.is_empty() {
+            self.process();
+        }
     }
 
     pub fn get_state(&self) -> &State {
-        return &self.state;
+        self.state.as_ref().unwrap()
+    }
+
+    pub fn dump(&self) -> Result<Vec<u8>, Box<ErrorKind>> {
+        let state = self.state.as_ref().unwrap();
+        let save_state = SaveState {
+            emulator_selected: state.emulator_selected,
+        };
+        debug!("state dumped to: {:?}", save_state);
+
+        serialize(&save_state)
+    }
+
+    pub fn load(&mut self, serialized_state: &Vec<u8>) {
+        let save_state: SaveState = deserialize(serialized_state).expect("could not load state");
+        debug!("state loaded: {:?}", save_state);
+
+        self.dispatch(Action::Initialize(save_state));
+        self.process();
     }
 }
 
 /// Store's middlewares
-pub fn trigger_middleware(action: Action) -> Vec<Action> {
-    match action {
-        x @ Action::Initialize {} => vec![
-            x,
-            Action::LoadRoms {
-                roms: vec![String::from("foo"), String::from("bar")],
-            },
-        ],
-        _ => vec![action],
+fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
+    match &action {
+        &Action::Initialize { .. } | &Action::NextEmulator { .. } => {
+            let f = |store: &mut Store| {
+                let roms = get_roms(&store.get_state().get_emulator().path);
+                store.dispatch(Action::LoadRoms { roms })
+            };
+            store.dispatch_thunk(Box::new(f));
+
+            Some(action)
+        }
+        _ => Some(action),
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct Rom {
+    pub path: String,
+    pub name: String,
+}
+
+fn get_roms(path: &str) -> Result<Vec<Rom>, String> {
+    let resolved_path = path.replace("~", env::home_dir().unwrap().to_str().unwrap());
+    let mut roms = fs::read_dir(resolved_path)
+        .or_else(|x| Err(String::from(x.description())))?
+        .map(|x| x.unwrap().path())
+        .filter(|x| x.is_file())
+        .map(|x| Rom {
+            path: x.to_str().unwrap().to_string(),
+            name: x.file_stem().unwrap().to_os_string().into_string().unwrap(),
+        })
+        .collect::<Vec<_>>();
+    roms.sort_by(|a, b| a.name.cmp(&b.name));
+
+    Ok(roms)
 }

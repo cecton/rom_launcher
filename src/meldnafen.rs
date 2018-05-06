@@ -1,12 +1,14 @@
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 use sdl2::pixels::Color;
-use sdl2::rect::Rect;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use id_tree::*;
 use num_traits::cast::ToPrimitive;
 use std::cmp;
+use std::fs::File;
+use std::io::prelude::*;
+use std::io;
 
 use app::*;
 use store::*;
@@ -26,38 +28,71 @@ struct List {}
 impl Entity for List {
     #[allow(unused_must_use)]
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
-        canvas.set_draw_color(Color::RGB(0, 0, 0));
-        canvas.clear();
-        canvas.set_draw_color(Color::RGB(255, 0, 0));
-        canvas.draw_rect(Rect::new(0, 0, 15, 15));
         resources.font.set_line_spacing(0.75);
         resources.font.set_pos(0, 0);
-        resources.font.texture.set_color_mod(255, 255, 255);
-        resources
-            .font
-            .println(canvas, &format!("< {} >", state.emulator.name));
-        resources.font.println(canvas, "");
-        for rom in &state.roms {
-            resources.font.println(canvas, &rom);
+        if state.rom_selected == -1 {
+            resources.font.texture.set_color_mod(255, 255, 0);
+        } else {
+            resources.font.texture.set_color_mod(255, 255, 255);
         }
-        resources.font.println(canvas, "");
         resources
             .font
-            .println(canvas, &format!("Page x of y ({} roms)", &state.roms.len()));
-        resources.font.texture.set_color_mod(255, 0, 0);
-        resources.font.println(canvas, "Hello\nWorld!");
+            .println(canvas, &format!("< {} >", state.get_emulator().name));
+        resources.font.println(canvas, "");
+        resources.font.texture.set_color_mod(255, 255, 255);
+        match &state.roms {
+            &Ok(ref roms) => {
+                for (i, rom) in roms.iter().enumerate() {
+                    if i as i32 == state.rom_selected {
+                        resources.font.texture.set_color_mod(255, 255, 0);
+                    }
+                    resources.font.println(canvas, &rom.name);
+                    if i as i32 == state.rom_selected {
+                        resources.font.texture.set_color_mod(255, 255, 255);
+                    }
+                }
+                resources.font.println(canvas, "");
+                resources
+                    .font
+                    .println(canvas, &format!("Page x of y ({} roms)", roms.len()));
+            }
+            &Err(ref err) => {
+                resources.font.texture.set_color_mod(255, 0, 0);
+                resources.font.println(canvas, &err);
+            }
+        }
     }
 
     fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
-        match event {
-            &Event::Quit { .. }
-            | &Event::KeyDown {
+        let rom_selected = store.get_state().rom_selected;
+
+        match *event {
+            Event::Quit { .. }
+            | Event::KeyDown {
                 keycode: Some(Keycode::Q),
                 ..
-            } => {
-                app.quit();
-            }
-            _ => {}
+            } => app.quit(),
+            Event::KeyUp {
+                keycode: Some(Keycode::Down),
+                ..
+            } => store.dispatch(Action::NextRom { step: 1 }),
+            Event::KeyUp {
+                keycode: Some(Keycode::Up),
+                ..
+            } => store.dispatch(Action::NextRom { step: -1 }),
+            Event::KeyUp {
+                keycode: Some(Keycode::Right),
+                ..
+            } => if rom_selected == -1 {
+                store.dispatch(Action::NextEmulator { step: 1 })
+            },
+            Event::KeyUp {
+                keycode: Some(Keycode::Left),
+                ..
+            } => if rom_selected == -1 {
+                store.dispatch(Action::NextEmulator { step: -1 })
+            },
+            _ => return false,
         }
 
         return true;
@@ -68,18 +103,20 @@ struct Resources {
     font: Font,
 }
 
-pub struct Meldnafen<'a> {
+pub struct Meldnafen {
     pub app: App,
-    store: Store<'a>,
+    store: Store,
     resources: Resources,
     tree: Tree<Box<Entity>>,
 }
 
-impl<'a> Meldnafen<'a> {
-    pub fn new(canvas: Canvas<Window>) -> Meldnafen<'a> {
+impl Meldnafen {
+    pub fn new(canvas: Canvas<Window>) -> Meldnafen {
         let mut app = App::new(canvas);
-        let mut store = Store::new(vec![Box::new(trigger_middleware)]);
-        store.dispatch(Action::Initialize {});
+        let mut store = Store::new();
+        if let Err(err) = Meldnafen::load_state(&mut store) {
+            error!("could not load state: {}", err);
+        }
 
         debug!("setting up canvas...");
         let (w, h) = app.canvas.output_size().unwrap();
@@ -96,12 +133,21 @@ impl<'a> Meldnafen<'a> {
         let resources = Self::load_resources(&app);
         let tree = Self::load_entites();
 
-        return Meldnafen {
+        Meldnafen {
             app,
             store,
             resources,
             tree,
-        };
+        }
+    }
+
+    fn load_state(store: &mut Store) -> Result<(), io::Error> {
+        let mut file = File::open("save_state")?;
+        let mut serialized_state: Vec<u8> = vec![];
+        file.read_to_end(&mut serialized_state)?;
+        store.load(&serialized_state);
+
+        Ok(())
     }
 
     fn load_resources(app: &App) -> Resources {
@@ -125,6 +171,10 @@ impl<'a> Meldnafen<'a> {
     }
 
     pub fn render(&mut self) {
+        debug!("rerender");
+        self.app.canvas.set_draw_color(Color::RGB(0, 0, 0));
+        self.app.canvas.clear();
+
         let root_id = self.tree.root_node_id().unwrap();
         for node in self.tree.traverse_pre_order(&root_id).unwrap() {
             node.data().render(
@@ -145,7 +195,26 @@ impl<'a> Meldnafen<'a> {
                 || node.data()
                     .apply_event(&event, &mut self.app, &mut self.store);
         }
+        self.store.process();
 
         return result;
     }
+}
+
+impl Drop for Meldnafen {
+    fn drop(&mut self) {
+        info!("exiting...");
+        debug!("saving state: {:?}", self.store.get_state());
+        if let Err(err) = save_state(&mut self.store) {
+            error!("could not write to save_sate: {}", err);
+        }
+    }
+}
+
+fn save_state(store: &Store) -> Result<(), io::Error> {
+    let serialized_state = store.dump().expect("could not serialize state");
+    let mut file = File::create("save_state")?;
+    file.write_all(serialized_state.as_slice())?;
+
+    Ok(())
 }
