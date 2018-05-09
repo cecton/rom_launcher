@@ -4,7 +4,6 @@ use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use id_tree::*;
-use num_traits::cast::ToPrimitive;
 use std::cmp;
 use std::fs::File;
 use std::io::prelude::*;
@@ -30,6 +29,7 @@ impl Entity for List {
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
         resources.font.set_line_spacing(0.75);
         resources.font.set_pos(0, 0);
+
         if state.rom_selected == -1 {
             resources.font.texture.set_color_mod(255, 255, 0);
         } else {
@@ -39,10 +39,15 @@ impl Entity for List {
             .font
             .println(canvas, &format!("< {} >", state.get_emulator().name));
         resources.font.println(canvas, "");
+
         resources.font.texture.set_color_mod(255, 255, 255);
         match &state.roms {
             &Ok(ref roms) => {
-                for (i, rom) in roms.iter().enumerate() {
+                for (i, rom) in roms.iter()
+                    .skip((state.page_index * PAGE_SIZE) as usize)
+                    .take(PAGE_SIZE as usize)
+                    .enumerate()
+                {
                     if i as i32 == state.rom_selected {
                         resources.font.texture.set_color_mod(255, 255, 0);
                     }
@@ -52,9 +57,15 @@ impl Entity for List {
                     }
                 }
                 resources.font.println(canvas, "");
-                resources
-                    .font
-                    .println(canvas, &format!("Page x of y ({} roms)", roms.len()));
+                resources.font.println(
+                    canvas,
+                    &format!(
+                        "Page {} of {} ({} roms)",
+                        state.page_index + 1,
+                        state.page_count,
+                        roms.len()
+                    ),
+                );
             }
             &Err(ref err) => {
                 resources.font.texture.set_color_mod(255, 0, 0);
@@ -85,12 +96,16 @@ impl Entity for List {
                 ..
             } => if rom_selected == -1 {
                 store.dispatch(Action::NextEmulator { step: 1 })
+            } else {
+                store.dispatch(Action::NextPage { step: 1 })
             },
             Event::KeyUp {
                 keycode: Some(Keycode::Left),
                 ..
             } => if rom_selected == -1 {
                 store.dispatch(Action::NextEmulator { step: -1 })
+            } else {
+                store.dispatch(Action::NextPage { step: -1 })
             },
             _ => return false,
         }
@@ -120,9 +135,7 @@ impl Meldnafen {
 
         debug!("setting up canvas...");
         let (w, h) = app.canvas.output_size().unwrap();
-        let zoom = cmp::min(w as i32 / TV_XRES, h as i32 / TV_YRES)
-            .to_f32()
-            .unwrap();
+        let zoom = cmp::min(w as i32 / TV_XRES, h as i32 / TV_YRES) as f32;
         app.canvas.set_scale(zoom, zoom).unwrap();
 
         let mut viewport = app.canvas.viewport();

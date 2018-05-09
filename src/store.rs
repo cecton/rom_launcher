@@ -1,16 +1,20 @@
-use std::cmp;
 use std::fs;
 use std::env;
 use std::error::Error;
 use bincode::{deserialize, serialize, ErrorKind};
 
+pub const PAGE_SIZE: i32 = 15;
+
 /// The state of the application
 #[derive(Debug)]
 pub struct State {
+    pub page_index: i32,
+    pub page_count: i32,
     pub emulator_selected: i32,
     pub emulators: Vec<Emulator>,
     pub roms: Result<Vec<Rom>, String>,
     pub rom_selected: i32,
+    pub rom_count: i32,
 }
 
 impl State {
@@ -37,6 +41,7 @@ pub enum Action {
     Initialize(SaveState),
     LoadRoms { roms: Result<Vec<Rom>, String> },
     NextRom { step: i32 },
+    NextPage { step: i32 },
     NextEmulator { step: i32 },
 }
 
@@ -48,21 +53,54 @@ fn reduce(state: State, action: Action) -> State {
             emulator_selected: save_state.emulator_selected,
             ..state
         },
-        Action::LoadRoms { roms } => State {
-            roms: roms,
-            ..state
-        },
-        Action::NextRom { step } => {
-            if state.roms.is_err() {
-                return state;
-            }
-
-            let max = state.roms.as_ref().unwrap().len() as i32 - 1;
-            let rom_selected = cmp::min(cmp::max(state.rom_selected + step, -1), max);
+        Action::LoadRoms { roms } => {
+            let rom_count = match &roms {
+                &Err(_) => 0,
+                &Ok(ref roms) => roms.len() as i32,
+            };
 
             State {
-                rom_selected,
+                page_count: (rom_count - 1).wrapping_div(PAGE_SIZE) + 1,
+                page_index: 0,
+                rom_selected: -1,
+                rom_count,
+                roms,
                 ..state
+            }
+        }
+        Action::NextRom { step } => {
+            let max = if state.page_index < state.page_count - 1 {
+                PAGE_SIZE
+            } else {
+                state.rom_count.wrapping_rem(PAGE_SIZE)
+            };
+            let rom_selected = state.rom_selected + step;
+            if state.roms.is_err() || rom_selected < -1 {
+                State {
+                    rom_selected: -1,
+                    ..state
+                }
+            } else if rom_selected >= max {
+                State {
+                    rom_selected: max - 1,
+                    ..state
+                }
+            } else {
+                State {
+                    rom_selected,
+                    ..state
+                }
+            }
+        }
+        Action::NextPage { step } => {
+            let page_index = state.page_index + step;
+            if state.roms.is_err() || page_index < 0 || page_index >= state.page_count {
+                state
+            } else {
+                State {
+                    page_index,
+                    ..state
+                }
             }
         }
         Action::NextEmulator { step } => {
@@ -121,9 +159,12 @@ impl Store {
 
         State {
             emulators,
+            page_index: 0,
+            page_count: 1,
             emulator_selected: 0,
             roms: Ok(vec![]),
             rom_selected: -1,
+            rom_count: 0,
         }
     }
 
@@ -197,6 +238,12 @@ fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
                 store.dispatch(Action::LoadRoms { roms })
             };
             store.dispatch_thunk(Box::new(f));
+            store.dispatch(Action::NextRom { step: 0 });
+
+            Some(action)
+        }
+        &Action::NextPage { .. } => {
+            store.dispatch(Action::NextRom { step: 0 });
 
             Some(action)
         }

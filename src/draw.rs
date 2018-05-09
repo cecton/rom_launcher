@@ -1,7 +1,6 @@
 use sdl2::render::{Canvas, Texture};
 use sdl2::video::Window;
 use sdl2::rect::Rect;
-use num_traits::cast::ToPrimitive;
 
 pub struct Font {
     pub texture: Texture,
@@ -55,12 +54,7 @@ impl Font {
                 None => {
                     if c == '\n' {
                         dst.set_x(self.x);
-                        dst.set_y(
-                            self.y
-                                + (self.h.to_f32().unwrap() * self.line_spacing)
-                                    .to_i32()
-                                    .unwrap(),
-                        );
+                        dst.set_y(self.y + (self.h as f32 * self.line_spacing) as i32);
                     }
                 }
             }
@@ -79,9 +73,6 @@ impl Font {
     #[allow(dead_code)]
     pub fn println(&mut self, canvas: &mut Canvas<Window>, text: &str) {
         let (_, y) = self._print(canvas, text);
-        self.y = y
-            + (self.h.to_f32().unwrap() * self.line_spacing)
-                .to_i32()
-                .unwrap();
+        self.y = y + (self.h as f32 * self.line_spacing) as i32;
     }
 }

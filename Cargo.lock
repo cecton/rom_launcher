@@ -118,7 +118,6 @@ dependencies = [
  "env_logger 0.5.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "id_tree 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "num-traits 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "sdl2 0.31.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.45 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.45 (registry+https://github.com/rust-lang/crates.io-index)",

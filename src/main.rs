@@ -3,7 +3,6 @@ extern crate env_logger;
 extern crate id_tree;
 #[macro_use]
 extern crate log;
-extern crate num_traits;
 extern crate sdl2;
 extern crate serde;
 #[macro_use]
