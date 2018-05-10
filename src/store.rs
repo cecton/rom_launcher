@@ -8,6 +8,7 @@ pub const PAGE_SIZE: i32 = 15;
 /// The state of the application
 #[derive(Debug)]
 pub struct State {
+    pub screen: Screen,
     pub page_index: i32,
     pub page_count: i32,
     pub emulator_selected: i32,
@@ -35,6 +36,12 @@ pub struct Emulator {
     pub path: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Screen {
+    List,
+    GameLauncher,
+}
+
 /// An Enum of all the possible actions in the application
 #[derive(Clone, Debug)]
 pub enum Action {
@@ -43,6 +50,7 @@ pub enum Action {
     NextRom { step: i32 },
     NextPage { step: i32 },
     NextEmulator { step: i32 },
+    LaunchGame,
 }
 
 /// Reducer
@@ -117,6 +125,10 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
+        Action::LaunchGame => State {
+            screen: Screen::GameLauncher,
+            ..state
+        },
         _ => state,
     }
 }
@@ -158,6 +170,7 @@ impl Store {
         ];
 
         State {
+            screen: Screen::List,
             emulators,
             page_index: 0,
             page_count: 1,

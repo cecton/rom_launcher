@@ -3,6 +3,7 @@ use sdl2::video::Window;
 use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
+use sdl2::joystick::HatState;
 use id_tree::*;
 use std::cmp;
 use std::fs::File;
@@ -17,6 +18,7 @@ const TV_XRES: i32 = 256;
 const TV_YRES: i32 = 224;
 
 trait Entity {
+    fn is_active(&self, _state: &State) -> bool;
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources);
     fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool;
 }
@@ -25,6 +27,10 @@ trait Entity {
 struct List {}
 
 impl Entity for List {
+    fn is_active(&self, state: &State) -> bool {
+        state.screen == Screen::List
+    }
+
     #[allow(unused_must_use)]
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
         resources.font.set_line_spacing(0.75);
@@ -74,25 +80,32 @@ impl Entity for List {
         }
     }
 
-    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
+    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
         let rom_selected = store.get_state().rom_selected;
 
         match *event {
-            Event::Quit { .. }
-            | Event::KeyDown {
-                keycode: Some(Keycode::Q),
-                ..
-            } => app.quit(),
             Event::KeyUp {
                 keycode: Some(Keycode::Down),
+                ..
+            }
+            | Event::JoyHatMotion {
+                state: HatState::Down,
                 ..
             } => store.dispatch(Action::NextRom { step: 1 }),
             Event::KeyUp {
                 keycode: Some(Keycode::Up),
                 ..
+            }
+            | Event::JoyHatMotion {
+                state: HatState::Up,
+                ..
             } => store.dispatch(Action::NextRom { step: -1 }),
             Event::KeyUp {
                 keycode: Some(Keycode::Right),
+                ..
+            }
+            | Event::JoyHatMotion {
+                state: HatState::Right,
                 ..
             } => if rom_selected == -1 {
                 store.dispatch(Action::NextEmulator { step: 1 })
@@ -102,15 +115,79 @@ impl Entity for List {
             Event::KeyUp {
                 keycode: Some(Keycode::Left),
                 ..
+            }
+            | Event::JoyHatMotion {
+                state: HatState::Left,
+                ..
             } => if rom_selected == -1 {
                 store.dispatch(Action::NextEmulator { step: -1 })
             } else {
                 store.dispatch(Action::NextPage { step: -1 })
             },
+            Event::KeyUp {
+                keycode: Some(Keycode::Return),
+                ..
+            }
+            | Event::JoyButtonUp { button_idx: 0, .. } => if rom_selected > -1 {
+                store.dispatch(Action::LaunchGame {})
+            } else {
+                return false;
+            },
             _ => return false,
         }
 
         return true;
+    }
+}
+
+#[derive(Debug)]
+struct GameLauncher {}
+
+impl Entity for GameLauncher {
+    fn is_active(&self, state: &State) -> bool {
+        state.screen == Screen::GameLauncher
+    }
+
+    #[allow(unused_must_use)]
+    fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
+        resources.font.set_line_spacing(0.75);
+        resources.font.set_pos(0, 0);
+        resources.font.println(canvas, "Start");
+    }
+
+    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
+        false
+    }
+}
+
+struct Root {}
+
+impl Entity for Root {
+    fn is_active(&self, _state: &State) -> bool {
+        true
+    }
+
+    fn render(&self, canvas: &mut Canvas<Window>, _state: &State, _resources: &mut Resources) {
+        canvas.set_draw_color(Color::RGB(0, 0, 0));
+        canvas.clear();
+    }
+
+    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
+        match *event {
+            Event::Quit { .. }
+            | Event::KeyUp {
+                keycode: Some(Keycode::Q),
+                ..
+            }
+            | Event::KeyUp {
+                keycode: Some(Keycode::Escape),
+                ..
+            } => app.quit(),
+            Event::JoyDeviceAdded { which, .. } => app.open_joystick(which),
+            _ => {}
+        }
+
+        false
     }
 }
 
@@ -126,8 +203,14 @@ pub struct Meldnafen {
 }
 
 impl Meldnafen {
-    pub fn new(canvas: Canvas<Window>) -> Meldnafen {
-        let mut app = App::new(canvas);
+    pub fn new() -> Meldnafen {
+        let mut app = App::new(|video| {
+            video
+                .window("meldnafen", 800, 700)
+                .position(0, 0)
+                .borderless()
+                .build()
+        });
         let mut store = Store::new();
         if let Err(err) = Meldnafen::load_state(&mut store) {
             error!("could not load state: {}", err);
@@ -177,24 +260,26 @@ impl Meldnafen {
     fn load_entites() -> Tree<Box<Entity>> {
         use id_tree::InsertBehavior::*;
 
-        let mut tree: Tree<Box<Entity>> = TreeBuilder::new().with_node_capacity(1).build();
-        tree.insert(Node::new(Box::new(List {})), AsRoot);
+        let mut tree: Tree<Box<Entity>> = TreeBuilder::new().with_node_capacity(3).build();
+        let root_id = tree.insert(Node::new(Box::new(Root {})), AsRoot).unwrap();
+        tree.insert(Node::new(Box::new(List {})), UnderNode(&root_id));
+        tree.insert(Node::new(Box::new(GameLauncher {})), UnderNode(&root_id));
 
         tree
     }
 
     pub fn render(&mut self) {
         debug!("rerender");
-        self.app.canvas.set_draw_color(Color::RGB(0, 0, 0));
-        self.app.canvas.clear();
 
         let root_id = self.tree.root_node_id().unwrap();
         for node in self.tree.traverse_pre_order(&root_id).unwrap() {
-            node.data().render(
-                &mut self.app.canvas,
-                self.store.get_state(),
-                &mut self.resources,
-            );
+            let entity = node.data();
+            let state = self.store.get_state();
+            if !entity.is_active(state) {
+                continue;
+            }
+
+            entity.render(&mut self.app.canvas, state, &mut self.resources);
         }
 
         self.app.canvas.present();
@@ -204,13 +289,35 @@ impl Meldnafen {
         let mut result = false;
         let root_id = self.tree.root_node_id().unwrap();
         for node in self.tree.traverse_pre_order(&root_id).unwrap() {
-            result = result
-                || node.data()
-                    .apply_event(&event, &mut self.app, &mut self.store);
+            let entity = node.data();
+            {
+                let state = self.store.get_state();
+                if !entity.is_active(state) {
+                    continue;
+                }
+            }
+
+            result = result || entity.apply_event(&event, &mut self.app, &mut self.store);
         }
         self.store.process();
 
         return result;
+    }
+
+    pub fn run_loop(&mut self) {
+        debug!("looping over events...");
+        let mut event_pump = self.app.sdl_context.event_pump().unwrap();
+        'running: for event in event_pump.wait_iter() {
+            let rerender = self.apply_event(event);
+
+            if !self.app.is_running() {
+                break 'running;
+            }
+
+            if rerender {
+                self.render();
+            }
+        }
     }
 }
 
