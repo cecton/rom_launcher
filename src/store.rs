@@ -16,6 +16,7 @@ pub struct State {
     pub roms: Result<Vec<Rom>, String>,
     pub rom_selected: i32,
     pub rom_count: i32,
+    pub players: [Option<Player>; 10],
 }
 
 impl State {
@@ -29,6 +30,12 @@ pub struct SaveState {
     pub emulator_selected: i32,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Screen {
+    List,
+    GameLauncher,
+}
+
 #[derive(Clone, Debug)]
 pub struct Emulator {
     pub id: String,
@@ -36,10 +43,18 @@ pub struct Emulator {
     pub path: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Screen {
-    List,
-    GameLauncher,
+#[derive(Copy, Clone, Debug)]
+pub struct Player {
+    pub joystick: i32,
+    pub menu: PlayerMenu,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum PlayerMenu {
+    Controls,
+    Ready,
+    Leave,
+    Waiting,
 }
 
 /// An Enum of all the possible actions in the application
@@ -51,6 +66,9 @@ pub enum Action {
     NextPage { step: i32 },
     NextEmulator { step: i32 },
     LaunchGame,
+    AddPlayer(i32),
+    NextPlayerMenu(i32),
+    PrevPlayerMenu(i32),
 }
 
 /// Reducer
@@ -129,6 +147,47 @@ fn reduce(state: State, action: Action) -> State {
             screen: Screen::GameLauncher,
             ..state
         },
+        Action::AddPlayer(joystick) => match state.players.iter().position(|x| x.is_none()) {
+            None => state,
+            Some(free_slot) => {
+                let mut players = state.players;
+                players[free_slot] = Some(Player {
+                    joystick,
+                    menu: PlayerMenu::Ready,
+                });
+                State { players, ..state }
+            }
+        },
+        Action::NextPlayerMenu(joystick_id) => {
+            let mut players = state.players;
+            for maybe_player in players.iter_mut() {
+                if let Some(player) = maybe_player.as_mut() {
+                    if player.joystick == joystick_id {
+                        match player.menu {
+                            PlayerMenu::Ready => player.menu = PlayerMenu::Leave,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            State { players, ..state }
+        }
+        Action::PrevPlayerMenu(joystick_id) => {
+            let mut players = state.players;
+            for maybe_player in players.iter_mut() {
+                if let Some(player) = maybe_player.as_mut() {
+                    if player.joystick == joystick_id {
+                        match player.menu {
+                            PlayerMenu::Leave => player.menu = PlayerMenu::Ready,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            State { players, ..state }
+        }
         _ => state,
     }
 }
@@ -178,6 +237,7 @@ impl Store {
             roms: Ok(vec![]),
             rom_selected: -1,
             rom_count: 0,
+            players: [None; 10],
         }
     }
 

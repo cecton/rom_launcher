@@ -9,6 +9,7 @@ pub struct Font {
     h: i32,
     x: i32,
     y: i32,
+    line_start: i32,
     line_spacing: f32,
 }
 
@@ -26,6 +27,7 @@ impl Font {
             h,
             x: 0,
             y: 0,
+            line_start: 0,
             line_spacing: 1.0,
         }
     }
@@ -33,6 +35,7 @@ impl Font {
     pub fn set_pos(&mut self, x: i32, y: i32) {
         self.x = x;
         self.y = y;
+        self.line_start = x;
     }
 
     pub fn set_line_spacing(&mut self, line_spacing: f32) {
@@ -73,6 +76,7 @@ impl Font {
     #[allow(dead_code)]
     pub fn println(&mut self, canvas: &mut Canvas<Window>, text: &str) {
         let (_, y) = self._print(canvas, text);
+        self.x = self.line_start;
         self.y = y + (self.h as f32 * self.line_spacing) as i32;
     }
 }

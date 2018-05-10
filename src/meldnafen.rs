@@ -17,6 +17,16 @@ use draw::*;
 const TV_XRES: i32 = 256;
 const TV_YRES: i32 = 224;
 
+macro_rules! set_highlight {
+    ($font:expr, $value:expr) => {
+        if $value {
+            $font.texture.set_color_mod(255, 255, 0);
+        } else {
+            $font.texture.set_color_mod(255, 255, 255);
+        }
+    }
+}
+
 trait Entity {
     fn is_active(&self, _state: &State) -> bool;
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources);
@@ -136,7 +146,7 @@ impl Entity for List {
             _ => return false,
         }
 
-        return true;
+        true
     }
 }
 
@@ -152,11 +162,55 @@ impl Entity for GameLauncher {
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
         resources.font.set_line_spacing(0.75);
         resources.font.set_pos(0, 0);
-        resources.font.println(canvas, "Start");
+
+        let mut i = 0;
+        for maybe_player in state.players.iter() {
+            match *maybe_player {
+                Some(player) => {
+                    i += 1;
+                    resources.font.texture.set_color_mod(255, 255, 255);
+                    resources.font.print(canvas, &format!("{:2}:", i));
+                    set_highlight!(resources.font, player.menu == PlayerMenu::Controls);
+                    resources.font.print(canvas, "  Controls");
+                    set_highlight!(resources.font, player.menu == PlayerMenu::Ready);
+                    resources.font.print(canvas, "  Ready");
+                    set_highlight!(resources.font, player.menu == PlayerMenu::Leave);
+                    resources.font.print(canvas, "            Leave");
+                }
+                None => {}
+            }
+            resources.font.println(canvas, "\n");
+        }
+
+        if i == 0 {
+            resources.font.set_pos(0, 0);
+            resources
+                .font
+                .println(canvas, "Press the first button to add a player");
+        }
     }
 
     fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
-        false
+        match *event {
+            Event::JoyButtonUp {
+                which,
+                button_idx: 0,
+                ..
+            } => store.dispatch(Action::AddPlayer(which)),
+            Event::JoyHatMotion {
+                which,
+                state: HatState::Right,
+                ..
+            } => store.dispatch(Action::NextPlayerMenu(which)),
+            Event::JoyHatMotion {
+                which,
+                state: HatState::Left,
+                ..
+            } => store.dispatch(Action::PrevPlayerMenu(which)),
+            _ => return false,
+        }
+
+        true
     }
 }
 
@@ -211,6 +265,7 @@ impl Meldnafen {
                 .borderless()
                 .build()
         });
+        app.sdl_context.mouse().show_cursor(false);
         let mut store = Store::new();
         if let Err(err) = Meldnafen::load_state(&mut store) {
             error!("could not load state: {}", err);
