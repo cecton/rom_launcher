@@ -5,6 +5,18 @@ use bincode::{deserialize, serialize, ErrorKind};
 
 pub const PAGE_SIZE: i32 = 15;
 
+macro_rules! find_player {
+    ($players:expr, $joystick:expr, $closure:expr) => {
+        for (i, maybe_player) in $players.iter_mut().enumerate() {
+            if let Some(player) = maybe_player.as_mut() {
+                if player.joystick == $joystick {
+                    $closure(i, player)
+                }
+            }
+        }
+    }
+}
+
 /// The state of the application
 #[derive(Debug)]
 pub struct State {
@@ -55,6 +67,9 @@ pub enum PlayerMenu {
     Ready,
     Leave,
     Waiting,
+    ConsoleControls,
+    GameControls,
+    ControlsExit,
 }
 
 /// An Enum of all the possible actions in the application
@@ -65,10 +80,11 @@ pub enum Action {
     NextRom { step: i32 },
     NextPage { step: i32 },
     NextEmulator { step: i32 },
-    LaunchGame,
+    LaunchGame(i32),
     AddPlayer(i32),
     NextPlayerMenu(i32),
     PrevPlayerMenu(i32),
+    GoPlayerMenu(i32),
 }
 
 /// Reducer
@@ -143,10 +159,19 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        Action::LaunchGame => State {
-            screen: Screen::GameLauncher,
-            ..state
-        },
+        Action::LaunchGame(joystick) => {
+            let mut players = [None; 10];
+            players[0] = Some(Player {
+                joystick,
+                menu: PlayerMenu::Ready,
+            });
+
+            State {
+                screen: Screen::GameLauncher,
+                players,
+                ..state
+            }
+        }
         Action::AddPlayer(joystick) => match state.players.iter().position(|x| x.is_none()) {
             None => state,
             Some(free_slot) => {
@@ -159,34 +184,68 @@ fn reduce(state: State, action: Action) -> State {
             }
         },
         Action::NextPlayerMenu(joystick_id) => {
+            use store::PlayerMenu::*;
             let mut players = state.players;
-            for maybe_player in players.iter_mut() {
-                if let Some(player) = maybe_player.as_mut() {
-                    if player.joystick == joystick_id {
-                        match player.menu {
-                            PlayerMenu::Ready => player.menu = PlayerMenu::Leave,
-                            _ => {}
-                        }
-                    }
+            find_player!(
+                players,
+                joystick_id,
+                |i: usize, player: &mut Player| match player.menu {
+                    Ready => player.menu = Leave,
+                    Controls => player.menu = Ready,
+                    ConsoleControls => player.menu = GameControls,
+                    GameControls => player.menu = ControlsExit,
+                    _ => {}
                 }
-            }
+            );
 
             State { players, ..state }
         }
         Action::PrevPlayerMenu(joystick_id) => {
+            use store::PlayerMenu::*;
             let mut players = state.players;
-            for maybe_player in players.iter_mut() {
-                if let Some(player) = maybe_player.as_mut() {
-                    if player.joystick == joystick_id {
-                        match player.menu {
-                            PlayerMenu::Leave => player.menu = PlayerMenu::Ready,
-                            _ => {}
-                        }
-                    }
+            find_player!(
+                players,
+                joystick_id,
+                |i: usize, player: &mut Player| match player.menu {
+                    Leave => player.menu = Ready,
+                    Ready => player.menu = Controls,
+                    GameControls => player.menu = ConsoleControls,
+                    ControlsExit => player.menu = GameControls,
+                    _ => {}
                 }
-            }
+            );
 
             State { players, ..state }
+        }
+        Action::GoPlayerMenu(joystick_id) => {
+            use store::PlayerMenu::*;
+            let mut screen = state.screen;
+            let mut players = state.players;
+            let mut remove_player = None;
+            find_player!(
+                players,
+                joystick_id,
+                |i: usize, player: &mut Player| match player.menu {
+                    Ready => player.menu = Waiting,
+                    Waiting => player.menu = Ready,
+                    Controls => player.menu = ConsoleControls,
+                    ControlsExit => player.menu = Controls,
+                    Leave => remove_player = Some(i),
+                    _ => {}
+                }
+            );
+
+            match remove_player {
+                Some(0) => screen = Screen::List,
+                Some(i) => players[i] = None,
+                None => {}
+            }
+
+            State {
+                screen,
+                players,
+                ..state
+            }
         }
         _ => state,
     }

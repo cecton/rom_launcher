@@ -21,10 +21,19 @@ pub fn main() {
     builder.filter(None, LevelFilter::Debug).init();
     info!("starting up");
 
-    debug!("initializing application...");
-    let mut meldnafen = meldnafen::Meldnafen::new();
-    meldnafen.render();
-    meldnafen.run_loop();
+    let mut command;
+    loop {
+        {
+            let mut meldnafen = meldnafen::Meldnafen::new();
+            meldnafen.render();
+            command = meldnafen.run_loop();
+        }
+
+        if command.is_none() {
+            debug!("no command received");
+            break;
+        }
+    }
 
     debug!("terminated");
 }

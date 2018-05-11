@@ -4,13 +4,13 @@ use sdl2::rect::Rect;
 
 pub struct Font {
     pub texture: Texture,
-    chars: Vec<char>,
-    w: i32,
-    h: i32,
-    x: i32,
-    y: i32,
-    line_start: i32,
-    line_spacing: f32,
+    pub chars: Vec<char>,
+    pub w: i32,
+    pub h: i32,
+    pub x: i32,
+    pub y: i32,
+    pub line_start: i32,
+    pub line_height: i32,
 }
 
 impl Font {
@@ -28,7 +28,7 @@ impl Font {
             x: 0,
             y: 0,
             line_start: 0,
-            line_spacing: 1.0,
+            line_height: h,
         }
     }
 
@@ -39,7 +39,7 @@ impl Font {
     }
 
     pub fn set_line_spacing(&mut self, line_spacing: f32) {
-        self.line_spacing = line_spacing;
+        self.line_height = (self.h as f32 * line_spacing) as i32;
     }
 
     #[allow(unused_must_use)]
@@ -57,7 +57,7 @@ impl Font {
                 None => {
                     if c == '\n' {
                         dst.set_x(self.x);
-                        dst.set_y(self.y + (self.h as f32 * self.line_spacing) as i32);
+                        dst.set_y(self.y + self.line_height);
                     }
                 }
             }
@@ -77,6 +77,6 @@ impl Font {
     pub fn println(&mut self, canvas: &mut Canvas<Window>, text: &str) {
         let (_, y) = self._print(canvas, text);
         self.x = self.line_start;
-        self.y = y + (self.h as f32 * self.line_spacing) as i32;
+        self.y = y + self.line_height;
     }
 }

@@ -4,6 +4,7 @@ use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::joystick::HatState;
+use sdl2::rect::Rect;
 use id_tree::*;
 use std::cmp;
 use std::fs::File;
@@ -134,12 +135,12 @@ impl Entity for List {
             } else {
                 store.dispatch(Action::NextPage { step: -1 })
             },
-            Event::KeyUp {
-                keycode: Some(Keycode::Return),
+            Event::JoyButtonUp {
+                button_idx: 0,
+                which,
                 ..
-            }
-            | Event::JoyButtonUp { button_idx: 0, .. } => if rom_selected > -1 {
-                store.dispatch(Action::LaunchGame {})
+            } => if rom_selected > -1 {
+                store.dispatch(Action::LaunchGame(which))
             } else {
                 return false;
             },
@@ -151,7 +152,9 @@ impl Entity for List {
 }
 
 #[derive(Debug)]
-struct GameLauncher {}
+struct GameLauncher {
+    player_colors: [Color; 10],
+}
 
 impl Entity for GameLauncher {
     fn is_active(&self, state: &State) -> bool {
@@ -164,29 +167,48 @@ impl Entity for GameLauncher {
         resources.font.set_pos(0, 0);
 
         let mut i = 0;
-        for maybe_player in state.players.iter() {
+        let line_height = resources.font.line_height;
+        let mut background = Rect::new(0, 0, TV_XRES as u32, line_height as u32 * 2);
+        for (slot, maybe_player) in state.players.iter().enumerate() {
             match *maybe_player {
                 Some(player) => {
+                    use store::PlayerMenu::*;
                     i += 1;
+                    canvas.set_draw_color(self.player_colors[slot]);
+                    canvas.fill_rect(background);
                     resources.font.texture.set_color_mod(255, 255, 255);
-                    resources.font.print(canvas, &format!("{:2}:", i));
-                    set_highlight!(resources.font, player.menu == PlayerMenu::Controls);
-                    resources.font.print(canvas, "  Controls");
-                    set_highlight!(resources.font, player.menu == PlayerMenu::Ready);
-                    resources.font.print(canvas, "  Ready");
-                    set_highlight!(resources.font, player.menu == PlayerMenu::Leave);
-                    resources.font.print(canvas, "            Leave");
+                    resources.font.print(canvas, &format!("{:2}:  ", i));
+                    match player.menu {
+                        Controls | Ready | Leave => {
+                            set_highlight!(resources.font, player.menu == Controls);
+                            resources.font.print(canvas, "Controls");
+                            set_highlight!(resources.font, player.menu == Ready);
+                            resources.font.print(canvas, "  Ready");
+                            set_highlight!(resources.font, player.menu == Leave);
+                            if slot == 0 {
+                                resources.font.print(canvas, "            Exit");
+                            } else {
+                                resources.font.print(canvas, "            Leave");
+                            }
+                        }
+                        ConsoleControls | GameControls | ControlsExit => {
+                            set_highlight!(resources.font, player.menu == ConsoleControls);
+                            resources.font.print(canvas, "Console");
+                            set_highlight!(resources.font, player.menu == GameControls);
+                            resources.font.print(canvas, "  Game");
+                            set_highlight!(resources.font, player.menu == ControlsExit);
+                            resources.font.print(canvas, "            Exit");
+                        }
+                        Waiting => {
+                            set_highlight!(resources.font, true);
+                            resources.font.print(canvas, "Waiting");
+                        }
+                    }
                 }
                 None => {}
             }
             resources.font.println(canvas, "\n");
-        }
-
-        if i == 0 {
-            resources.font.set_pos(0, 0);
-            resources
-                .font
-                .println(canvas, "Press the first button to add a player");
+            background.y += line_height * 2;
         }
     }
 
@@ -196,7 +218,17 @@ impl Entity for GameLauncher {
                 which,
                 button_idx: 0,
                 ..
-            } => store.dispatch(Action::AddPlayer(which)),
+            } => if !store
+                .get_state()
+                .players
+                .iter()
+                .filter(|x| x.is_some())
+                .any(|x| x.as_ref().unwrap().joystick == which)
+            {
+                store.dispatch(Action::AddPlayer(which));
+            } else {
+                store.dispatch(Action::GoPlayerMenu(which));
+            },
             Event::JoyHatMotion {
                 which,
                 state: HatState::Right,
@@ -279,6 +311,8 @@ impl Meldnafen {
         let mut viewport = app.canvas.viewport();
         viewport.x = (viewport.w - TV_XRES) / 2;
         viewport.y = (viewport.h - TV_YRES) / 2;
+        viewport.w = TV_XRES;
+        viewport.h = TV_YRES;
         app.canvas.set_viewport(viewport);
 
         let resources = Self::load_resources(&app);
@@ -318,7 +352,22 @@ impl Meldnafen {
         let mut tree: Tree<Box<Entity>> = TreeBuilder::new().with_node_capacity(3).build();
         let root_id = tree.insert(Node::new(Box::new(Root {})), AsRoot).unwrap();
         tree.insert(Node::new(Box::new(List {})), UnderNode(&root_id));
-        tree.insert(Node::new(Box::new(GameLauncher {})), UnderNode(&root_id));
+        let player_colors = [
+            Color::RGB(0xb9, 0x00, 0x00),
+            Color::RGB(0x00, 0x00, 0xb9),
+            Color::RGB(0x00, 0xb9, 0x00),
+            Color::RGB(0xb9, 0x00, 0xb9),
+            Color::RGB(0x00, 0xb9, 0xb9),
+            Color::RGB(0xb9, 0x5c, 0x00),
+            Color::RGB(0xb9, 0x00, 0x5c),
+            Color::RGB(0x5c, 0xb9, 0x00),
+            Color::RGB(0x5c, 0x00, 0xb9),
+            Color::RGB(0x00, 0x5c, 0xb9),
+        ];
+        tree.insert(
+            Node::new(Box::new(GameLauncher { player_colors })),
+            UnderNode(&root_id),
+        );
 
         tree
     }
@@ -359,7 +408,7 @@ impl Meldnafen {
         return result;
     }
 
-    pub fn run_loop(&mut self) {
+    pub fn run_loop(&mut self) -> Option<String> {
         debug!("looping over events...");
         let mut event_pump = self.app.sdl_context.event_pump().unwrap();
         'running: for event in event_pump.wait_iter() {
@@ -373,6 +422,8 @@ impl Meldnafen {
                 self.render();
             }
         }
+
+        None
     }
 }
 
