@@ -5,6 +5,8 @@ use sdl2::image::LoadTexture;
 use sdl2::joystick::Joystick;
 use std::collections::HashMap;
 
+use joystick::JoystickInfo;
+
 pub struct App {
     pub sdl_context: sdl2::Sdl,
     pub joystick: sdl2::JoystickSubsystem,
@@ -52,19 +54,29 @@ impl App {
         self.running = false;
     }
 
-    pub fn open_joystick(&mut self, which: u32) {
+    pub fn open_joystick(&mut self, which: u32) -> Option<JoystickInfo> {
         match self.joystick.open(which) {
-            Ok(x) => {
-                info!("added new joystick: {}", x.name());
-                self.opened_joysticks.insert(x.instance_id(), x);
+            Ok(joystick) => {
+                let id = joystick.instance_id();
+                info!("added new joystick: {}", joystick.name());
+                let index = self.opened_joysticks
+                    .values()
+                    .filter(|x| x.guid() == joystick.guid() && x.attached())
+                    .count();
+                let joystick_info = JoystickInfo::new(&joystick, index);
+                debug!("new joystick info: {:?}", joystick_info);
+                self.opened_joysticks.insert(id, joystick);
+                Some(joystick_info)
             }
-            Err(err) => error!("could not open joystick: {}", err),
+            Err(err) => {
+                error!("could not open joystick: {}", err);
+                None
+            }
         }
     }
 
-    pub fn get_joystick(&self, which: i32) -> &Joystick {
-        self.opened_joysticks
-            .get(&which)
-            .expect("received an invalid joystick instance id")
+    pub fn close_joystick(&mut self, which: i32) {
+        self.opened_joysticks.remove(&which);
+        info!("removed joystick");
     }
 }

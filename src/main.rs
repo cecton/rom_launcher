@@ -15,6 +15,7 @@ mod app;
 mod meldnafen;
 mod store;
 mod draw;
+mod joystick;
 
 pub fn main() {
     let mut builder = Builder::from_default_env();

@@ -92,6 +92,7 @@ impl Entity for List {
     }
 
     fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
+        use store::Action::*;
         let rom_selected = store.get_state().rom_selected;
 
         match *event {
@@ -102,7 +103,7 @@ impl Entity for List {
             | Event::JoyHatMotion {
                 state: HatState::Down,
                 ..
-            } => store.dispatch(Action::NextRom { step: 1 }),
+            } => store.dispatch(NextRom { step: 1 }),
             Event::KeyUp {
                 keycode: Some(Keycode::Up),
                 ..
@@ -110,7 +111,7 @@ impl Entity for List {
             | Event::JoyHatMotion {
                 state: HatState::Up,
                 ..
-            } => store.dispatch(Action::NextRom { step: -1 }),
+            } => store.dispatch(NextRom { step: -1 }),
             Event::KeyUp {
                 keycode: Some(Keycode::Right),
                 ..
@@ -119,9 +120,9 @@ impl Entity for List {
                 state: HatState::Right,
                 ..
             } => if rom_selected == -1 {
-                store.dispatch(Action::NextEmulator { step: 1 })
+                store.dispatch(NextEmulator { step: 1 })
             } else {
-                store.dispatch(Action::NextPage { step: 1 })
+                store.dispatch(NextPage { step: 1 })
             },
             Event::KeyUp {
                 keycode: Some(Keycode::Left),
@@ -131,16 +132,16 @@ impl Entity for List {
                 state: HatState::Left,
                 ..
             } => if rom_selected == -1 {
-                store.dispatch(Action::NextEmulator { step: -1 })
+                store.dispatch(NextEmulator { step: -1 })
             } else {
-                store.dispatch(Action::NextPage { step: -1 })
+                store.dispatch(NextPage { step: -1 })
             },
             Event::JoyButtonUp {
                 button_idx: 0,
                 which,
                 ..
             } => if rom_selected > -1 {
-                store.dispatch(Action::LaunchGame(which))
+                store.dispatch(LaunchGame(which))
             } else {
                 return false;
             },
@@ -152,67 +153,18 @@ impl Entity for List {
 }
 
 #[derive(Debug)]
-struct GameLauncher {
-    player_colors: [Color; 10],
-}
+struct GameLauncher {}
 
 impl Entity for GameLauncher {
     fn is_active(&self, state: &State) -> bool {
         state.screen == Screen::GameLauncher
     }
 
-    #[allow(unused_must_use)]
-    fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
-        resources.font.set_line_spacing(0.75);
-        resources.font.set_pos(0, 0);
+    fn render(&self, _canvas: &mut Canvas<Window>, _state: &State, _resources: &mut Resources) {}
 
-        let mut i = 0;
-        let line_height = resources.font.line_height;
-        let mut background = Rect::new(0, 0, TV_XRES as u32, line_height as u32 * 2);
-        for (slot, maybe_player) in state.players.iter().enumerate() {
-            match *maybe_player {
-                Some(player) => {
-                    use store::PlayerMenu::*;
-                    i += 1;
-                    canvas.set_draw_color(self.player_colors[slot]);
-                    canvas.fill_rect(background);
-                    resources.font.texture.set_color_mod(255, 255, 255);
-                    resources.font.print(canvas, &format!("{:2}:  ", i));
-                    match player.menu {
-                        Controls | Ready | Leave => {
-                            set_highlight!(resources.font, player.menu == Controls);
-                            resources.font.print(canvas, "Controls");
-                            set_highlight!(resources.font, player.menu == Ready);
-                            resources.font.print(canvas, "  Ready");
-                            set_highlight!(resources.font, player.menu == Leave);
-                            if slot == 0 {
-                                resources.font.print(canvas, "            Exit");
-                            } else {
-                                resources.font.print(canvas, "            Leave");
-                            }
-                        }
-                        ConsoleControls | GameControls | ControlsExit => {
-                            set_highlight!(resources.font, player.menu == ConsoleControls);
-                            resources.font.print(canvas, "Console");
-                            set_highlight!(resources.font, player.menu == GameControls);
-                            resources.font.print(canvas, "  Game");
-                            set_highlight!(resources.font, player.menu == ControlsExit);
-                            resources.font.print(canvas, "            Exit");
-                        }
-                        Waiting => {
-                            set_highlight!(resources.font, true);
-                            resources.font.print(canvas, "Waiting");
-                        }
-                    }
-                }
-                None => {}
-            }
-            resources.font.println(canvas, "\n");
-            background.y += line_height * 2;
-        }
-    }
+    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
+        use store::Action::*;
 
-    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
         match *event {
             Event::JoyButtonUp {
                 which,
@@ -225,20 +177,112 @@ impl Entity for GameLauncher {
                 .filter(|x| x.is_some())
                 .any(|x| x.as_ref().unwrap().joystick == which)
             {
-                store.dispatch(Action::AddPlayer(which));
-            } else {
-                store.dispatch(Action::GoPlayerMenu(which));
+                store.dispatch(AddPlayer(which));
+            },
+            _ => return false,
+        }
+
+        true
+    }
+}
+
+#[derive(Debug)]
+struct PlayerMenu {
+    index: usize,
+    color: Color,
+}
+
+impl Entity for PlayerMenu {
+    fn is_active(&self, state: &State) -> bool {
+        state.players[self.index].is_some()
+    }
+
+    #[allow(unused_must_use)]
+    fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
+        use store::PlayerMenu::*;
+
+        resources.font.set_line_spacing(1.50);
+        let line_height = resources.font.line_height;
+        let player = state.players[self.index].as_ref().unwrap();
+        let actual_player_index = state
+            .players
+            .iter()
+            .take(self.index)
+            .filter(|x| x.is_some())
+            .count();
+
+        let background = Rect::new(
+            0,
+            line_height * self.index as i32,
+            TV_XRES as u32,
+            line_height as u32,
+        );
+        canvas.set_draw_color(self.color);
+        canvas.fill_rect(background);
+
+        resources.font.texture.set_color_mod(255, 255, 255);
+        resources.font.set_pos(
+            0,
+            line_height * self.index as i32 + line_height.wrapping_div(4),
+        );
+        resources
+            .font
+            .print(canvas, &format!(" {:2} >   ", actual_player_index + 1));
+
+        match player.menu {
+            Controls | Ready | Leave => {
+                set_highlight!(resources.font, player.menu == Controls);
+                resources.font.print(canvas, "Controls");
+                set_highlight!(resources.font, player.menu == Ready);
+                resources.font.print(canvas, "   Ready");
+                set_highlight!(resources.font, player.menu == Leave);
+                if self.index == 0 {
+                    resources.font.print(canvas, "            Exit");
+                } else {
+                    resources.font.print(canvas, "            Leave");
+                }
+            }
+            ConsoleControls | GameControls | ControlsExit => {
+                set_highlight!(resources.font, player.menu == ConsoleControls);
+                resources.font.print(canvas, "Console");
+                set_highlight!(resources.font, player.menu == GameControls);
+                resources.font.print(canvas, "    Game");
+                set_highlight!(resources.font, player.menu == ControlsExit);
+                resources.font.print(canvas, "             Back");
+            }
+            Waiting => {
+                set_highlight!(resources.font, true);
+                resources.font.print(canvas, "Waiting");
+            }
+        }
+    }
+
+    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
+        use store::Action::*;
+
+        let player_joystick = store.get_state().players[self.index].unwrap().joystick;
+        match *event {
+            Event::JoyButtonUp {
+                which,
+                button_idx: 0,
+                ..
+            } => if player_joystick == which {
+                store.dispatch(GoPlayerMenu(which));
             },
             Event::JoyHatMotion {
                 which,
                 state: HatState::Right,
                 ..
-            } => store.dispatch(Action::NextPlayerMenu(which)),
+            } => if player_joystick == which {
+                store.dispatch(NextPlayerMenu(which));
+            },
             Event::JoyHatMotion {
                 which,
                 state: HatState::Left,
                 ..
-            } => store.dispatch(Action::PrevPlayerMenu(which)),
+            } => if player_joystick == which {
+                store.dispatch(PrevPlayerMenu(which));
+            },
             _ => return false,
         }
 
@@ -259,6 +303,8 @@ impl Entity for Root {
     }
 
     fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
+        use store::Action::*;
+
         match *event {
             Event::Quit { .. }
             | Event::KeyUp {
@@ -269,7 +315,16 @@ impl Entity for Root {
                 keycode: Some(Keycode::Escape),
                 ..
             } => app.quit(),
-            Event::JoyDeviceAdded { which, .. } => app.open_joystick(which),
+            Event::JoyDeviceAdded { which, .. } => {
+                if let Some(info) = app.open_joystick(which) {
+                    store.dispatch(AddJoystick(info));
+                }
+            }
+            Event::JoyDeviceRemoved { which, .. } => {
+                store.dispatch(RemoveJoystick(which));
+                app.close_joystick(which);
+                return true;
+            }
             _ => {}
         }
 
@@ -349,9 +404,11 @@ impl Meldnafen {
     fn load_entites() -> Tree<Box<Entity>> {
         use id_tree::InsertBehavior::*;
 
-        let mut tree: Tree<Box<Entity>> = TreeBuilder::new().with_node_capacity(3).build();
+        let mut tree: Tree<Box<Entity>> = TreeBuilder::new().with_node_capacity(4).build();
         let root_id = tree.insert(Node::new(Box::new(Root {})), AsRoot).unwrap();
         tree.insert(Node::new(Box::new(List {})), UnderNode(&root_id));
+        let game_launcher = tree.insert(Node::new(Box::new(GameLauncher {})), UnderNode(&root_id))
+            .unwrap();
         let player_colors = [
             Color::RGB(0xb9, 0x00, 0x00),
             Color::RGB(0x00, 0x00, 0xb9),
@@ -364,10 +421,15 @@ impl Meldnafen {
             Color::RGB(0x5c, 0x00, 0xb9),
             Color::RGB(0x00, 0x5c, 0xb9),
         ];
-        tree.insert(
-            Node::new(Box::new(GameLauncher { player_colors })),
-            UnderNode(&root_id),
-        );
+        for index in 0..9 {
+            tree.insert(
+                Node::new(Box::new(PlayerMenu {
+                    index,
+                    color: player_colors[index],
+                })),
+                UnderNode(&game_launcher),
+            );
+        }
 
         tree
     }
@@ -379,8 +441,21 @@ impl Meldnafen {
         for node in self.tree.traverse_pre_order(&root_id).unwrap() {
             let entity = node.data();
             let state = self.store.get_state();
+
             if !entity.is_active(state) {
                 continue;
+            }
+            if let Some(parent) = node.parent() {
+                if !self.tree.get(parent).unwrap().data().is_active(state) {
+                    continue;
+                }
+                if self.tree
+                    .ancestors(parent)
+                    .unwrap()
+                    .any(|x| !x.data().is_active(state))
+                {
+                    continue;
+                }
             }
 
             entity.render(&mut self.app.canvas, state, &mut self.resources);
@@ -394,14 +469,27 @@ impl Meldnafen {
         let root_id = self.tree.root_node_id().unwrap();
         for node in self.tree.traverse_pre_order(&root_id).unwrap() {
             let entity = node.data();
+
             {
                 let state = self.store.get_state();
                 if !entity.is_active(state) {
                     continue;
                 }
+                if let Some(parent) = node.parent() {
+                    if !self.tree.get(parent).unwrap().data().is_active(state) {
+                        continue;
+                    }
+                    if self.tree
+                        .ancestors(parent)
+                        .unwrap()
+                        .any(|x| !x.data().is_active(state))
+                    {
+                        continue;
+                    }
+                }
             }
 
-            result = result || entity.apply_event(&event, &mut self.app, &mut self.store);
+            result = entity.apply_event(&event, &mut self.app, &mut self.store) || result;
         }
         self.store.process();
 

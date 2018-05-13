@@ -1,7 +1,10 @@
 use std::fs;
 use std::env;
 use std::error::Error;
+use std::collections::HashMap;
 use bincode::{deserialize, serialize, ErrorKind};
+
+use joystick::JoystickInfo;
 
 pub const PAGE_SIZE: i32 = 15;
 
@@ -28,7 +31,9 @@ pub struct State {
     pub roms: Result<Vec<Rom>, String>,
     pub rom_selected: i32,
     pub rom_count: i32,
+    pub joysticks: HashMap<i32, JoystickInfo>,
     pub players: [Option<Player>; 10],
+    pub configs: HashMap<[u8; 16], Vec<JoystickConfig>>,
 }
 
 impl State {
@@ -72,6 +77,9 @@ pub enum PlayerMenu {
     ControlsExit,
 }
 
+#[derive(Clone, Debug)]
+pub struct JoystickConfig {}
+
 /// An Enum of all the possible actions in the application
 #[derive(Clone, Debug)]
 pub enum Action {
@@ -80,6 +88,8 @@ pub enum Action {
     NextRom { step: i32 },
     NextPage { step: i32 },
     NextEmulator { step: i32 },
+    AddJoystick(JoystickInfo),
+    RemoveJoystick(i32),
     LaunchGame(i32),
     AddPlayer(i32),
     NextPlayerMenu(i32),
@@ -90,12 +100,14 @@ pub enum Action {
 /// Reducer
 #[allow(unreachable_patterns)]
 fn reduce(state: State, action: Action) -> State {
+    use store::Action::*;
+
     match action {
-        Action::Initialize(save_state) => State {
+        Initialize(save_state) => State {
             emulator_selected: save_state.emulator_selected,
             ..state
         },
-        Action::LoadRoms { roms } => {
+        LoadRoms { roms } => {
             let rom_count = match &roms {
                 &Err(_) => 0,
                 &Ok(ref roms) => roms.len() as i32,
@@ -110,7 +122,7 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        Action::NextRom { step } => {
+        NextRom { step } => {
             let max = if state.page_index < state.page_count - 1 {
                 PAGE_SIZE
             } else {
@@ -134,7 +146,7 @@ fn reduce(state: State, action: Action) -> State {
                 }
             }
         }
-        Action::NextPage { step } => {
+        NextPage { step } => {
             let page_index = state.page_index + step;
             if state.roms.is_err() || page_index < 0 || page_index >= state.page_count {
                 state
@@ -145,7 +157,7 @@ fn reduce(state: State, action: Action) -> State {
                 }
             }
         }
-        Action::NextEmulator { step } => {
+        NextEmulator { step } => {
             let max = state.emulators.len() as i32 - 1;
             let mut emulator_selected = state.emulator_selected + step;
             if emulator_selected < 0 {
@@ -159,12 +171,32 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        Action::LaunchGame(joystick) => {
-            let mut players = [None; 10];
-            players[0] = Some(Player {
-                joystick,
-                menu: PlayerMenu::Ready,
+        AddJoystick(info) => {
+            let mut joysticks = state.joysticks;
+            joysticks.insert(info.instance_id, info);
+
+            State { joysticks, ..state }
+        }
+        RemoveJoystick(joystick_id) => {
+            let mut joysticks = state.joysticks;
+            joysticks.remove(&joystick_id);
+            let mut players = state.players;
+            let mut remove_player = None;
+            find_player!(players, joystick_id, |i: usize, _player: &mut Player| {
+                remove_player = Some(i)
             });
+            if let Some(i) = remove_player {
+                players[i] = None;
+            }
+
+            State {
+                joysticks,
+                players,
+                ..state
+            }
+        }
+        LaunchGame(..) => {
+            let mut players = [None; 10];
 
             State {
                 screen: Screen::GameLauncher,
@@ -172,7 +204,7 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        Action::AddPlayer(joystick) => match state.players.iter().position(|x| x.is_none()) {
+        AddPlayer(joystick) => match state.players.iter().position(|x| x.is_none()) {
             None => state,
             Some(free_slot) => {
                 let mut players = state.players;
@@ -180,16 +212,17 @@ fn reduce(state: State, action: Action) -> State {
                     joystick,
                     menu: PlayerMenu::Ready,
                 });
+
                 State { players, ..state }
             }
         },
-        Action::NextPlayerMenu(joystick_id) => {
+        NextPlayerMenu(joystick_id) => {
             use store::PlayerMenu::*;
             let mut players = state.players;
             find_player!(
                 players,
                 joystick_id,
-                |i: usize, player: &mut Player| match player.menu {
+                |_i: usize, player: &mut Player| match player.menu {
                     Ready => player.menu = Leave,
                     Controls => player.menu = Ready,
                     ConsoleControls => player.menu = GameControls,
@@ -200,13 +233,13 @@ fn reduce(state: State, action: Action) -> State {
 
             State { players, ..state }
         }
-        Action::PrevPlayerMenu(joystick_id) => {
+        PrevPlayerMenu(joystick_id) => {
             use store::PlayerMenu::*;
             let mut players = state.players;
             find_player!(
                 players,
                 joystick_id,
-                |i: usize, player: &mut Player| match player.menu {
+                |_i: usize, player: &mut Player| match player.menu {
                     Leave => player.menu = Ready,
                     Ready => player.menu = Controls,
                     GameControls => player.menu = ConsoleControls,
@@ -217,7 +250,7 @@ fn reduce(state: State, action: Action) -> State {
 
             State { players, ..state }
         }
-        Action::GoPlayerMenu(joystick_id) => {
+        GoPlayerMenu(joystick_id) => {
             use store::PlayerMenu::*;
             let mut screen = state.screen;
             let mut players = state.players;
@@ -296,7 +329,9 @@ impl Store {
             roms: Ok(vec![]),
             rom_selected: -1,
             rom_count: 0,
+            joysticks: HashMap::new(),
             players: [None; 10],
+            configs: HashMap::new(),
         }
     }
 
@@ -311,11 +346,12 @@ impl Store {
     }
 
     pub fn process(&mut self) {
+        use store::StoreAction::*;
         let todo: Vec<_> = self.queue.drain(..).collect();
 
         for action in todo {
             match action {
-                StoreAction::Simple(action) => {
+                Simple(action) => {
                     let mut action = Some(action);
 
                     debug!("applying middlewares");
@@ -329,7 +365,7 @@ impl Store {
                         self.state = Some(state);
                     }
                 }
-                StoreAction::Thunk(f) => f(self),
+                Thunk(f) => f(self),
             }
         }
 
@@ -363,19 +399,26 @@ impl Store {
 
 /// Store's middlewares
 fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
+    use store::Action::*;
+
     match &action {
-        &Action::Initialize { .. } | &Action::NextEmulator { .. } => {
+        &Initialize { .. } | &NextEmulator { .. } => {
             let f = |store: &mut Store| {
                 let roms = get_roms(&store.get_state().get_emulator().path);
-                store.dispatch(Action::LoadRoms { roms })
+                store.dispatch(LoadRoms { roms })
             };
             store.dispatch_thunk(Box::new(f));
-            store.dispatch(Action::NextRom { step: 0 });
+            store.dispatch(NextRom { step: 0 });
 
             Some(action)
         }
-        &Action::NextPage { .. } => {
-            store.dispatch(Action::NextRom { step: 0 });
+        &NextPage { .. } => {
+            store.dispatch(NextRom { step: 0 });
+
+            Some(action)
+        }
+        &LaunchGame(joystick) => {
+            store.dispatch(AddPlayer(joystick));
 
             Some(action)
         }
