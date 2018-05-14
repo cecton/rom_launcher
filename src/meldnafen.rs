@@ -10,11 +10,13 @@ use std::cmp;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io;
+use std::collections::VecDeque;
 
 use app::*;
 use store::*;
 use draw::*;
 
+const ENTITES: usize = 4;
 const TV_XRES: i32 = 256;
 const TV_YRES: i32 = 224;
 
@@ -28,7 +30,7 @@ macro_rules! set_highlight {
     }
 }
 
-trait Entity {
+pub trait Entity {
     fn is_active(&self, _state: &State) -> bool;
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources);
     fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool;
@@ -332,7 +334,7 @@ impl Entity for Root {
     }
 }
 
-struct Resources {
+pub struct Resources {
     font: Font,
 }
 
@@ -404,7 +406,7 @@ impl Meldnafen {
     fn load_entites() -> Tree<Box<Entity>> {
         use id_tree::InsertBehavior::*;
 
-        let mut tree: Tree<Box<Entity>> = TreeBuilder::new().with_node_capacity(4).build();
+        let mut tree: Tree<Box<Entity>> = TreeBuilder::new().with_node_capacity(ENTITES).build();
         let root_id = tree.insert(Node::new(Box::new(Root {})), AsRoot).unwrap();
         tree.insert(Node::new(Box::new(List {})), UnderNode(&root_id));
         let game_launcher = tree.insert(Node::new(Box::new(GameLauncher {})), UnderNode(&root_id))
@@ -434,29 +436,12 @@ impl Meldnafen {
         tree
     }
 
-    pub fn render(&mut self) {
+    pub fn render(&mut self, node_ids: &Vec<NodeId>) {
         debug!("rerender");
 
-        let root_id = self.tree.root_node_id().unwrap();
-        for node in self.tree.traverse_pre_order(&root_id).unwrap() {
-            let entity = node.data();
-            let state = self.store.get_state();
-
-            if !entity.is_active(state) {
-                continue;
-            }
-            if let Some(parent) = node.parent() {
-                if !self.tree.get(parent).unwrap().data().is_active(state) {
-                    continue;
-                }
-                if self.tree
-                    .ancestors(parent)
-                    .unwrap()
-                    .any(|x| !x.data().is_active(state))
-                {
-                    continue;
-                }
-            }
+        let state = self.store.get_state();
+        for node in node_ids {
+            let entity = self.tree.get(&node).unwrap().data();
 
             entity.render(&mut self.app.canvas, state, &mut self.resources);
         }
@@ -464,30 +449,10 @@ impl Meldnafen {
         self.app.canvas.present();
     }
 
-    pub fn apply_event(&mut self, event: Event) -> bool {
+    pub fn apply_event(&mut self, event: Event, node_ids: &Vec<NodeId>) -> bool {
         let mut result = false;
-        let root_id = self.tree.root_node_id().unwrap();
-        for node in self.tree.traverse_pre_order(&root_id).unwrap() {
-            let entity = node.data();
-
-            {
-                let state = self.store.get_state();
-                if !entity.is_active(state) {
-                    continue;
-                }
-                if let Some(parent) = node.parent() {
-                    if !self.tree.get(parent).unwrap().data().is_active(state) {
-                        continue;
-                    }
-                    if self.tree
-                        .ancestors(parent)
-                        .unwrap()
-                        .any(|x| !x.data().is_active(state))
-                    {
-                        continue;
-                    }
-                }
-            }
+        for node in node_ids {
+            let entity = self.tree.get(&node).unwrap().data();
 
             result = entity.apply_event(&event, &mut self.app, &mut self.store) || result;
         }
@@ -496,18 +461,29 @@ impl Meldnafen {
         return result;
     }
 
+    pub fn collect_entities(&self) -> Vec<NodeId> {
+        let root_id = self.tree.root_node_id().unwrap().clone();
+        let state = self.store.get_state();
+        return OnlyActiveTraversal::new(&self.tree, root_id, state).collect();
+    }
+
     pub fn run_loop(&mut self) -> Option<String> {
+        let node_ids = self.collect_entities();
+        self.render(&node_ids);
+
         debug!("looping over events...");
         let mut event_pump = self.app.sdl_context.event_pump().unwrap();
         'running: for event in event_pump.wait_iter() {
-            let rerender = self.apply_event(event);
+            let node_ids = self.collect_entities();
+
+            let rerender = self.apply_event(event, &node_ids);
 
             if !self.app.is_running() {
                 break 'running;
             }
 
             if rerender {
-                self.render();
+                self.render(&node_ids);
             }
         }
 
@@ -531,4 +507,46 @@ fn save_state(store: &Store) -> Result<(), io::Error> {
     file.write_all(serialized_state.as_slice())?;
 
     Ok(())
+}
+
+pub struct OnlyActiveTraversal<'a> {
+    tree: &'a Tree<Box<Entity>>,
+    data: VecDeque<NodeId>,
+    state: &'a State,
+}
+
+impl<'a> OnlyActiveTraversal<'a> {
+    pub fn new(
+        tree: &'a Tree<Box<Entity>>,
+        node_id: NodeId,
+        state: &'a State,
+    ) -> OnlyActiveTraversal<'a> {
+        let mut data = VecDeque::with_capacity(ENTITES);
+
+        data.push_front(node_id);
+
+        OnlyActiveTraversal { tree, data, state }
+    }
+}
+
+impl<'a> Iterator for OnlyActiveTraversal<'a> {
+    type Item = NodeId;
+
+    fn next(&mut self) -> Option<NodeId> {
+        self.data.pop_front().and_then(|node_id| {
+            let node_ref = self.tree.get(&node_id).unwrap();
+
+            for child_id in node_ref.children().iter().rev() {
+                if self.tree
+                    .get(child_id)
+                    .ok()
+                    .map_or(false, |x| x.data().is_active(self.state))
+                {
+                    self.data.push_front(child_id.clone());
+                }
+            }
+
+            Some(node_id)
+        })
+    }
 }

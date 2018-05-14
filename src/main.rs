@@ -26,7 +26,6 @@ pub fn main() {
     loop {
         {
             let mut meldnafen = meldnafen::Meldnafen::new();
-            meldnafen.render();
             command = meldnafen.run_loop();
         }
 
