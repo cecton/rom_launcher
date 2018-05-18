@@ -16,7 +16,7 @@ use app::*;
 use store::*;
 use draw::*;
 
-const ENTITES: usize = 4;
+const ENTITES: usize = 23;
 const TV_XRES: i32 = 256;
 const TV_YRES: i32 = 224;
 
@@ -36,7 +36,6 @@ pub trait Entity {
     fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool;
 }
 
-#[derive(Debug)]
 struct List {}
 
 impl Entity for List {
@@ -154,15 +153,29 @@ impl Entity for List {
     }
 }
 
-#[derive(Debug)]
-struct GameLauncher {}
+struct GameLauncher {
+    player_colors: [Color; 10],
+}
 
 impl Entity for GameLauncher {
     fn is_active(&self, state: &State) -> bool {
         state.screen == Screen::GameLauncher
     }
 
-    fn render(&self, _canvas: &mut Canvas<Window>, _state: &State, _resources: &mut Resources) {}
+    #[allow(unused_must_use)]
+    fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
+        resources.font.set_line_spacing(1.50);
+        let line_height = resources.font.line_height;
+        let mut background = Rect::new(0, 0, TV_XRES as u32, line_height as u32);
+
+        for (i, player) in state.players.iter().enumerate() {
+            if player.is_some() {
+                canvas.set_draw_color(self.player_colors[i]);
+                canvas.fill_rect(background);
+            }
+            background.y += line_height;
+        }
+    }
 
     fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
         use store::Action::*;
@@ -180,6 +193,8 @@ impl Entity for GameLauncher {
                 .any(|x| x.as_ref().unwrap().joystick == which)
             {
                 store.dispatch(AddPlayer(which));
+            } else {
+                return false;
             },
             _ => return false,
         }
@@ -188,15 +203,19 @@ impl Entity for GameLauncher {
     }
 }
 
-#[derive(Debug)]
 struct PlayerMenu {
-    index: usize,
-    color: Color,
+    player_index: usize,
 }
 
 impl Entity for PlayerMenu {
     fn is_active(&self, state: &State) -> bool {
-        state.players[self.index].is_some()
+        if let Some(ref player) = state.players[self.player_index] {
+            if player.grab_input.is_none() {
+                return true;
+            }
+        }
+
+        false
     }
 
     #[allow(unused_must_use)]
@@ -205,27 +224,18 @@ impl Entity for PlayerMenu {
 
         resources.font.set_line_spacing(1.50);
         let line_height = resources.font.line_height;
-        let player = state.players[self.index].as_ref().unwrap();
+        let player = state.players[self.player_index].as_ref().unwrap();
         let actual_player_index = state
             .players
             .iter()
-            .take(self.index)
+            .take(self.player_index)
             .filter(|x| x.is_some())
             .count();
-
-        let background = Rect::new(
-            0,
-            line_height * self.index as i32,
-            TV_XRES as u32,
-            line_height as u32,
-        );
-        canvas.set_draw_color(self.color);
-        canvas.fill_rect(background);
 
         resources.font.texture.set_color_mod(255, 255, 255);
         resources.font.set_pos(
             0,
-            line_height * self.index as i32 + line_height.wrapping_div(4),
+            line_height * self.player_index as i32 + line_height.wrapping_div(4),
         );
         resources
             .font
@@ -238,7 +248,7 @@ impl Entity for PlayerMenu {
                 set_highlight!(resources.font, player.menu == Ready);
                 resources.font.print(canvas, "   Ready");
                 set_highlight!(resources.font, player.menu == Leave);
-                if self.index == 0 {
+                if self.player_index == 0 {
                     resources.font.print(canvas, "            Exit");
                 } else {
                     resources.font.print(canvas, "            Leave");
@@ -262,7 +272,10 @@ impl Entity for PlayerMenu {
     fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
         use store::Action::*;
 
-        let player_joystick = store.get_state().players[self.index].unwrap().joystick;
+        let player_joystick = store.get_state().players[self.player_index]
+            .as_ref()
+            .unwrap()
+            .joystick;
         match *event {
             Event::JoyButtonUp {
                 which,
@@ -285,6 +298,56 @@ impl Entity for PlayerMenu {
             } => if player_joystick == which {
                 store.dispatch(PrevPlayerMenu(which));
             },
+            _ => return false,
+        }
+
+        true
+    }
+}
+
+struct PlayerGrabInput {
+    player_index: usize,
+}
+
+impl Entity for PlayerGrabInput {
+    fn is_active(&self, state: &State) -> bool {
+        state.players[self.player_index]
+            .as_ref()
+            .and_then(|x| x.grab_input.as_ref())
+            .is_some()
+    }
+
+    #[allow(unused_must_use)]
+    fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
+        resources.font.set_line_spacing(1.50);
+        let line_height = resources.font.line_height;
+        resources.font.texture.set_color_mod(255, 255, 255);
+        resources.font.set_pos(
+            0,
+            line_height * self.player_index as i32 + line_height.wrapping_div(4),
+        );
+        let ref controls = state.players[self.player_index]
+            .as_ref()
+            .unwrap()
+            .grab_input
+            .as_ref()
+            .unwrap()
+            .1;
+        let (_, ref input_display) =
+            state.emulators[state.emulator_selected as usize].controls[controls.len()];
+        resources
+            .font
+            .print(canvas, &format!(" {} >", input_display));
+    }
+
+    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
+        use store::Action::*;
+
+        debug!("received event: {:?}", event);
+        match *event {
+            Event::JoyButtonUp {
+                which, button_idx, ..
+            } => store.dispatch(BindJoytstickButton(which, button_idx)),
             _ => return false,
         }
 
@@ -409,8 +472,6 @@ impl Meldnafen {
         let mut tree: Tree<Box<Entity>> = TreeBuilder::new().with_node_capacity(ENTITES).build();
         let root_id = tree.insert(Node::new(Box::new(Root {})), AsRoot).unwrap();
         tree.insert(Node::new(Box::new(List {})), UnderNode(&root_id));
-        let game_launcher = tree.insert(Node::new(Box::new(GameLauncher {})), UnderNode(&root_id))
-            .unwrap();
         let player_colors = [
             Color::RGB(0xb9, 0x00, 0x00),
             Color::RGB(0x00, 0x00, 0xb9),
@@ -423,12 +484,17 @@ impl Meldnafen {
             Color::RGB(0x5c, 0x00, 0xb9),
             Color::RGB(0x00, 0x5c, 0xb9),
         ];
-        for index in 0..9 {
+        let game_launcher = tree.insert(
+            Node::new(Box::new(GameLauncher { player_colors })),
+            UnderNode(&root_id),
+        ).unwrap();
+        for player_index in 0..9 {
             tree.insert(
-                Node::new(Box::new(PlayerMenu {
-                    index,
-                    color: player_colors[index],
-                })),
+                Node::new(Box::new(PlayerMenu { player_index })),
+                UnderNode(&game_launcher),
+            );
+            tree.insert(
+                Node::new(Box::new(PlayerGrabInput { player_index })),
                 UnderNode(&game_launcher),
             );
         }
@@ -468,22 +534,21 @@ impl Meldnafen {
     }
 
     pub fn run_loop(&mut self) -> Option<String> {
-        let node_ids = self.collect_entities();
-        self.render(&node_ids);
-
         debug!("looping over events...");
+        let mut rerender = true;
         let mut event_pump = self.app.sdl_context.event_pump().unwrap();
-        'running: for event in event_pump.wait_iter() {
+        loop {
             let node_ids = self.collect_entities();
-
-            let rerender = self.apply_event(event, &node_ids);
-
-            if !self.app.is_running() {
-                break 'running;
-            }
 
             if rerender {
                 self.render(&node_ids);
+            }
+
+            let event = event_pump.wait_event();
+            rerender = self.apply_event(event, &node_ids);
+
+            if !self.app.is_running() {
+                break;
             }
         }
 

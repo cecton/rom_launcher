@@ -5,11 +5,12 @@ use sdl2::image::LoadTexture;
 use sdl2::joystick::Joystick;
 use std::collections::HashMap;
 
-use joystick::JoystickInfo;
+use joystick::*;
 
 pub struct App {
     pub sdl_context: sdl2::Sdl,
     pub joystick: sdl2::JoystickSubsystem,
+    pub timer: sdl2::TimerSubsystem,
     running: bool,
     pub canvas: Canvas<Window>,
     pub texture_creator: TextureCreator<WindowContext>,
@@ -26,12 +27,14 @@ impl App {
         let sdl_context = sdl2::init().unwrap();
         let video = sdl_context.video().unwrap();
         let joystick = sdl_context.joystick().unwrap();
+        let timer = sdl_context.timer().unwrap();
         let canvas = build_window(video).unwrap().into_canvas().build().unwrap();
         let texture_creator = canvas.texture_creator();
 
         return App {
             sdl_context,
             joystick,
+            timer,
             running: true,
             canvas,
             texture_creator,

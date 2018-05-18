@@ -4,11 +4,11 @@ use std::error::Error;
 use std::collections::HashMap;
 use bincode::{deserialize, serialize, ErrorKind};
 
-use joystick::JoystickInfo;
+use joystick::*;
 
 pub const PAGE_SIZE: i32 = 15;
 
-macro_rules! find_player {
+macro_rules! modify_player {
     ($players:expr, $joystick:expr, $closure:expr) => {
         for (i, maybe_player) in $players.iter_mut().enumerate() {
             if let Some(player) = maybe_player.as_mut() {
@@ -33,12 +33,24 @@ pub struct State {
     pub rom_count: i32,
     pub joysticks: HashMap<i32, JoystickInfo>,
     pub players: [Option<Player>; 10],
-    pub configs: HashMap<[u8; 16], Vec<JoystickConfig>>,
+    pub console_configs: JoystickConfig,
+    pub game_configs: JoystickConfig,
 }
 
 impl State {
     pub fn get_emulator(&self) -> &Emulator {
         &self.emulators[self.emulator_selected as usize]
+    }
+
+    pub fn get_controls(&self) -> &Vec<(String, String)> {
+        &self.get_emulator().controls
+    }
+
+    pub fn get_player_index(&self, joystick_id: i32) -> usize {
+        self.players
+            .iter()
+            .position(|x| x.as_ref().map(|x| x.joystick) == Some(joystick_id))
+            .unwrap()
     }
 }
 
@@ -58,12 +70,31 @@ pub struct Emulator {
     pub id: String,
     pub name: String,
     pub path: String,
+    pub controls: Vec<(String, String)>,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
+pub struct JoystickConfig(HashMap<JoystickGuid, HashMap<String, Vec<String>>>);
+
+impl JoystickConfig {
+    fn new() -> JoystickConfig {
+        JoystickConfig(HashMap::new())
+    }
+
+    pub fn insert(&mut self, guid: JoystickGuid, key: String, mapping: Vec<String>) {
+        if !self.0.contains_key(&guid) {
+            self.0.insert(guid, HashMap::new());
+        }
+
+        self.0.get_mut(&guid).unwrap().insert(key, mapping);
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Player {
     pub joystick: i32,
     pub menu: PlayerMenu,
+    pub grab_input: Option<(GrabControl, Vec<String>)>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -77,8 +108,11 @@ pub enum PlayerMenu {
     ControlsExit,
 }
 
-#[derive(Clone, Debug)]
-pub struct JoystickConfig {}
+#[derive(Copy, Clone, Debug)]
+pub enum GrabControl {
+    Console,
+    Game,
+}
 
 /// An Enum of all the possible actions in the application
 #[derive(Clone, Debug)]
@@ -95,12 +129,12 @@ pub enum Action {
     NextPlayerMenu(i32),
     PrevPlayerMenu(i32),
     GoPlayerMenu(i32),
+    BindJoytstickButton(i32, u8),
 }
 
 /// Reducer
-#[allow(unreachable_patterns)]
 fn reduce(state: State, action: Action) -> State {
-    use store::Action::*;
+    use self::Action::*;
 
     match action {
         Initialize(save_state) => State {
@@ -182,21 +216,26 @@ fn reduce(state: State, action: Action) -> State {
             joysticks.remove(&joystick_id);
             let mut players = state.players;
             let mut remove_player = None;
-            find_player!(players, joystick_id, |i: usize, _player: &mut Player| {
+            let mut screen = state.screen;
+            modify_player!(players, joystick_id, |i: usize, _player: &mut Player| {
                 remove_player = Some(i)
             });
             if let Some(i) = remove_player {
                 players[i] = None;
             }
+            if players.iter().all(|x| x.is_none()) {
+                screen = Screen::List;
+            }
 
             State {
                 joysticks,
                 players,
+                screen,
                 ..state
             }
         }
         LaunchGame(..) => {
-            let mut players = [None; 10];
+            let mut players = [None, None, None, None, None, None, None, None, None, None];
 
             State {
                 screen: Screen::GameLauncher,
@@ -211,15 +250,17 @@ fn reduce(state: State, action: Action) -> State {
                 players[free_slot] = Some(Player {
                     joystick,
                     menu: PlayerMenu::Ready,
+                    grab_input: None,
                 });
 
                 State { players, ..state }
             }
         },
         NextPlayerMenu(joystick_id) => {
-            use store::PlayerMenu::*;
+            use self::PlayerMenu::*;
+
             let mut players = state.players;
-            find_player!(
+            modify_player!(
                 players,
                 joystick_id,
                 |_i: usize, player: &mut Player| match player.menu {
@@ -234,9 +275,10 @@ fn reduce(state: State, action: Action) -> State {
             State { players, ..state }
         }
         PrevPlayerMenu(joystick_id) => {
-            use store::PlayerMenu::*;
+            use self::PlayerMenu::*;
+
             let mut players = state.players;
-            find_player!(
+            modify_player!(
                 players,
                 joystick_id,
                 |_i: usize, player: &mut Player| match player.menu {
@@ -251,11 +293,13 @@ fn reduce(state: State, action: Action) -> State {
             State { players, ..state }
         }
         GoPlayerMenu(joystick_id) => {
-            use store::PlayerMenu::*;
+            use self::PlayerMenu::*;
+            use self::GrabControl::*;
+
             let mut screen = state.screen;
             let mut players = state.players;
             let mut remove_player = None;
-            find_player!(
+            modify_player!(
                 players,
                 joystick_id,
                 |i: usize, player: &mut Player| match player.menu {
@@ -264,7 +308,8 @@ fn reduce(state: State, action: Action) -> State {
                     Controls => player.menu = ConsoleControls,
                     ControlsExit => player.menu = Controls,
                     Leave => remove_player = Some(i),
-                    _ => {}
+                    ConsoleControls => player.grab_input = Some((Console, Vec::new())),
+                    GameControls => player.grab_input = Some((Game, Vec::new())),
                 }
             );
 
@@ -280,7 +325,36 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        _ => state,
+        BindJoytstickButton(joystick_id, button) => {
+            let controls_len = state.get_controls().len();
+            let emulator_id = state.get_emulator().id.clone();
+            let mut players = state.players;
+            let mut save_mapping = None;
+            modify_player!(players, joystick_id, |_i: usize, player: &mut Player| {
+                let (control, mut mapping) = player.grab_input.take().unwrap();
+                if mapping.len() < controls_len {
+                    mapping.push(format!("but{}", button));
+
+                    if mapping.len() == controls_len {
+                        save_mapping = Some(mapping);
+                    } else {
+                        player.grab_input = Some((control, mapping));
+                    }
+                }
+            });
+
+            let mut console_configs = state.console_configs;
+            if let Some(mapping) = save_mapping {
+                let guid = state.joysticks[&joystick_id].guid;
+                console_configs.insert(guid, emulator_id, mapping);
+            }
+
+            State {
+                players,
+                console_configs,
+                ..state
+            }
+        }
     }
 }
 
@@ -312,11 +386,22 @@ impl Store {
                 id: "pce".to_string(),
                 name: "PC Engine".to_string(),
                 path: "~/pce_roms".to_string(),
+                controls: vec![
+                    ("up".to_string(), "Up".to_string()),
+                    ("down".to_string(), "Down".to_string()),
+                    ("left".to_string(), "Left".to_string()),
+                    ("right".to_string(), "Right".to_string()),
+                    ("a".to_string(), "I".to_string()),
+                    ("b".to_string(), "II".to_string()),
+                    ("select".to_string(), "Select".to_string()),
+                    ("start".to_string(), "Run".to_string()),
+                ],
             },
             Emulator {
                 id: "md".to_string(),
                 name: "Mega Drive".to_string(),
                 path: "~/md_roms".to_string(),
+                controls: vec![],
             },
         ];
 
@@ -330,8 +415,9 @@ impl Store {
             rom_selected: -1,
             rom_count: 0,
             joysticks: HashMap::new(),
-            players: [None; 10],
-            configs: HashMap::new(),
+            players: [None, None, None, None, None, None, None, None, None, None],
+            console_configs: JoystickConfig::new(),
+            game_configs: JoystickConfig::new(),
         }
     }
 
@@ -346,7 +432,7 @@ impl Store {
     }
 
     pub fn process(&mut self) {
-        use store::StoreAction::*;
+        use self::StoreAction::*;
         let todo: Vec<_> = self.queue.drain(..).collect();
 
         for action in todo {
@@ -399,15 +485,14 @@ impl Store {
 
 /// Store's middlewares
 fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
-    use store::Action::*;
+    use self::Action::*;
 
     match &action {
         &Initialize { .. } | &NextEmulator { .. } => {
-            let f = |store: &mut Store| {
+            store.dispatch_thunk(Box::new(|store: &mut Store| {
                 let roms = get_roms(&store.get_state().get_emulator().path);
                 store.dispatch(LoadRoms { roms })
-            };
-            store.dispatch_thunk(Box::new(f));
+            }));
             store.dispatch(NextRom { step: 0 });
 
             Some(action)
