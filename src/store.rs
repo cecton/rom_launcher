@@ -1,8 +1,8 @@
-use std::fs;
+use bincode::{deserialize, serialize, ErrorKind};
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
-use std::collections::HashMap;
-use bincode::{deserialize, serialize, ErrorKind};
+use std::fs;
 
 use joystick::*;
 
@@ -17,7 +17,7 @@ macro_rules! modify_player {
                 }
             }
         }
-    }
+    };
 }
 
 /// The state of the application
@@ -52,6 +52,28 @@ impl State {
             .position(|x| x.as_ref().map(|x| x.joystick) == Some(joystick_id))
             .unwrap()
     }
+
+    pub fn get_rom(&self) -> &Rom {
+        self.roms
+            .as_ref()
+            .unwrap()
+            .get((self.page_index * PAGE_SIZE + self.rom_selected) as usize)
+            .unwrap()
+    }
+
+    pub fn player_needs_setup_controls(&self, player_index: usize) -> bool {
+        let joystick_id = &self.players[player_index].as_ref().unwrap().joystick;
+        self.joystick_needs_setup_controls(*joystick_id)
+    }
+
+    pub fn joystick_needs_setup_controls(&self, joystick_id: i32) -> bool {
+        let guid = &self.joysticks[&joystick_id].guid;
+        let emulator_id = &self.get_emulator().id;
+        let rom = &self.get_rom().file_name;
+
+        !self.console_configs.contains_key(guid, emulator_id)
+            && !self.game_configs.contains_key(guid, rom)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -74,6 +96,13 @@ pub struct Emulator {
 }
 
 #[derive(Clone, Debug)]
+pub struct Rom {
+    pub path: String,
+    pub name: String,
+    pub file_name: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct JoystickConfig(HashMap<JoystickGuid, HashMap<String, Vec<String>>>);
 
 impl JoystickConfig {
@@ -87,6 +116,10 @@ impl JoystickConfig {
         }
 
         self.0.get_mut(&guid).unwrap().insert(key, mapping);
+    }
+
+    pub fn contains_key(&self, guid: &JoystickGuid, key: &str) -> bool {
+        self.0.contains_key(guid) && self.0.get(guid).unwrap().contains_key(key)
     }
 }
 
@@ -246,10 +279,16 @@ fn reduce(state: State, action: Action) -> State {
         AddPlayer(joystick) => match state.players.iter().position(|x| x.is_none()) {
             None => state,
             Some(free_slot) => {
+                let player_needs_setup_controls = state.joystick_needs_setup_controls(joystick);
                 let mut players = state.players;
+
                 players[free_slot] = Some(Player {
                     joystick,
-                    menu: PlayerMenu::Ready,
+                    menu: if player_needs_setup_controls {
+                        PlayerMenu::Controls
+                    } else {
+                        PlayerMenu::Ready
+                    },
                     grab_input: None,
                 });
 
@@ -259,42 +298,50 @@ fn reduce(state: State, action: Action) -> State {
         NextPlayerMenu(joystick_id) => {
             use self::PlayerMenu::*;
 
+            let i = state.get_player_index(joystick_id);
+            let player_needs_setup_controls = state.player_needs_setup_controls(i);
             let mut players = state.players;
-            modify_player!(
-                players,
-                joystick_id,
-                |_i: usize, player: &mut Player| match player.menu {
+            if let Some(player) = players[i].as_mut() {
+                match player.menu {
                     Ready => player.menu = Leave,
-                    Controls => player.menu = Ready,
+                    Controls => if player_needs_setup_controls {
+                        player.menu = Leave;
+                    } else {
+                        player.menu = Ready;
+                    },
                     ConsoleControls => player.menu = GameControls,
                     GameControls => player.menu = ControlsExit,
                     _ => {}
                 }
-            );
+            }
 
             State { players, ..state }
         }
         PrevPlayerMenu(joystick_id) => {
             use self::PlayerMenu::*;
 
+            let i = state.get_player_index(joystick_id);
+            let player_needs_setup_controls = state.player_needs_setup_controls(i);
             let mut players = state.players;
-            modify_player!(
-                players,
-                joystick_id,
-                |_i: usize, player: &mut Player| match player.menu {
-                    Leave => player.menu = Ready,
+            if let Some(player) = players[i].as_mut() {
+                match player.menu {
+                    Leave => if player_needs_setup_controls {
+                        player.menu = Controls;
+                    } else {
+                        player.menu = Ready;
+                    },
                     Ready => player.menu = Controls,
                     GameControls => player.menu = ConsoleControls,
                     ControlsExit => player.menu = GameControls,
                     _ => {}
                 }
-            );
+            }
 
             State { players, ..state }
         }
         GoPlayerMenu(joystick_id) => {
-            use self::PlayerMenu::*;
             use self::GrabControl::*;
+            use self::PlayerMenu::*;
 
             let mut screen = state.screen;
             let mut players = state.players;
@@ -326,8 +373,11 @@ fn reduce(state: State, action: Action) -> State {
             }
         }
         BindJoytstickButton(joystick_id, button) => {
+            use self::GrabControl::*;
+
             let controls_len = state.get_controls().len();
             let emulator_id = state.get_emulator().id.clone();
+            let rom = state.get_rom().file_name.clone();
             let mut players = state.players;
             let mut save_mapping = None;
             modify_player!(players, joystick_id, |_i: usize, player: &mut Player| {
@@ -336,7 +386,7 @@ fn reduce(state: State, action: Action) -> State {
                     mapping.push(format!("but{}", button));
 
                     if mapping.len() == controls_len {
-                        save_mapping = Some(mapping);
+                        save_mapping = Some((control, mapping));
                     } else {
                         player.grab_input = Some((control, mapping));
                     }
@@ -344,14 +394,22 @@ fn reduce(state: State, action: Action) -> State {
             });
 
             let mut console_configs = state.console_configs;
-            if let Some(mapping) = save_mapping {
-                let guid = state.joysticks[&joystick_id].guid;
-                console_configs.insert(guid, emulator_id, mapping);
+            let mut game_configs = state.game_configs;
+            let guid = state.joysticks[&joystick_id].guid;
+            match save_mapping {
+                Some((Console, mapping)) => {
+                    console_configs.insert(guid, emulator_id, mapping);
+                }
+                Some((Game, mapping)) => {
+                    game_configs.insert(guid, rom, mapping);
+                }
+                _ => {}
             }
 
             State {
                 players,
                 console_configs,
+                game_configs,
                 ..state
             }
         }
@@ -511,12 +569,6 @@ fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Rom {
-    pub path: String,
-    pub name: String,
-}
-
 fn get_roms(path: &str) -> Result<Vec<Rom>, String> {
     let resolved_path = path.replace("~", env::home_dir().unwrap().to_str().unwrap());
     let mut roms = fs::read_dir(resolved_path)
@@ -526,6 +578,7 @@ fn get_roms(path: &str) -> Result<Vec<Rom>, String> {
         .map(|x| Rom {
             path: x.to_str().unwrap().to_string(),
             name: x.file_stem().unwrap().to_os_string().into_string().unwrap(),
+            file_name: x.file_name().unwrap().to_os_string().into_string().unwrap(),
         })
         .collect::<Vec<_>>();
     roms.sort_by(|a, b| a.name.cmp(&b.name));

@@ -8,14 +8,14 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
-use log::LevelFilter;
 use env_logger::Builder;
+use log::LevelFilter;
 
 mod app;
-mod meldnafen;
-mod store;
 mod draw;
 mod joystick;
+mod meldnafen;
+mod store;
 
 pub fn main() {
     let mut builder = Builder::from_default_env();

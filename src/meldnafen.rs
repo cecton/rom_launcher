@@ -1,20 +1,20 @@
+use id_tree::*;
+use sdl2::event::Event;
+use sdl2::joystick::HatState;
+use sdl2::keyboard::Keycode;
+use sdl2::pixels::Color;
+use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
-use sdl2::pixels::Color;
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
-use sdl2::joystick::HatState;
-use sdl2::rect::Rect;
-use id_tree::*;
 use std::cmp;
-use std::fs::File;
-use std::io::prelude::*;
-use std::io;
 use std::collections::VecDeque;
+use std::fs::File;
+use std::io;
+use std::io::prelude::*;
 
 use app::*;
-use store::*;
 use draw::*;
+use store::*;
 
 const ENTITES: usize = 23;
 const TV_XRES: i32 = 256;
@@ -27,7 +27,7 @@ macro_rules! set_highlight {
         } else {
             $font.texture.set_color_mod(255, 255, 255);
         }
-    }
+    };
 }
 
 pub trait Entity {
@@ -245,7 +245,11 @@ impl Entity for PlayerMenu {
             Controls | Ready | Leave => {
                 set_highlight!(resources.font, player.menu == Controls);
                 resources.font.print(canvas, "Controls");
-                set_highlight!(resources.font, player.menu == Ready);
+                if state.player_needs_setup_controls(self.player_index) {
+                    resources.font.texture.set_color_mod(0, 0, 0);
+                } else {
+                    set_highlight!(resources.font, player.menu == Ready);
+                }
                 resources.font.print(canvas, "   Ready");
                 set_highlight!(resources.font, player.menu == Leave);
                 if self.player_index == 0 {

@@ -1,8 +1,8 @@
 use sdl2;
-use sdl2::render::{Canvas, Texture, TextureCreator};
-use sdl2::video::{Window, WindowBuildError, WindowContext};
 use sdl2::image::LoadTexture;
 use sdl2::joystick::Joystick;
+use sdl2::render::{Canvas, Texture, TextureCreator};
+use sdl2::video::{Window, WindowBuildError, WindowContext};
 use std::collections::HashMap;
 
 use joystick::*;
