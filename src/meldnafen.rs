@@ -19,6 +19,9 @@ use store::*;
 const ENTITES: usize = 23;
 const TV_XRES: i32 = 256;
 const TV_YRES: i32 = 224;
+const AXIS_THRESOLD: i16 = 0x4fff;
+const JOYSTICK_LOCK_TIME: u32 = 100;
+const JOYSTICK_LOCK_TIME_AXIS: u32 = 200;
 
 macro_rules! set_highlight {
     ($font:expr, $value:expr) => {
@@ -26,6 +29,42 @@ macro_rules! set_highlight {
             $font.texture.set_color_mod(255, 255, 0);
         } else {
             $font.texture.set_color_mod(255, 255, 255);
+        }
+    };
+}
+
+macro_rules! lock_joystick {
+    ($joystick:expr, $timestamp:expr, $store:expr, $closure:expr) => {
+        if $timestamp
+            >= $store
+                .get_state()
+                .last_joystick_action
+                .get(&$joystick)
+                .or(Some(&0))
+                .unwrap() + JOYSTICK_LOCK_TIME
+        {
+            $store.dispatch(Action::UpdateJoystickLastAction($joystick, $timestamp));
+            $closure();
+        } else {
+            return false;
+        }
+    };
+}
+
+macro_rules! lock_joystick_axis {
+    ($joystick:expr, $timestamp:expr, $store:expr, $closure:expr) => {
+        if $timestamp
+            >= $store
+                .get_state()
+                .last_joystick_action
+                .get(&$joystick)
+                .or(Some(&0))
+                .unwrap() + JOYSTICK_LOCK_TIME_AXIS
+        {
+            $store.dispatch(Action::UpdateJoystickLastAction($joystick, $timestamp));
+            $closure();
+        } else {
+            return false;
         }
     };
 }
@@ -97,46 +136,98 @@ impl Entity for List {
         let rom_selected = store.get_state().rom_selected;
 
         match *event {
-            Event::KeyUp {
-                keycode: Some(Keycode::Down),
-                ..
-            }
-            | Event::JoyHatMotion {
+            Event::JoyHatMotion {
                 state: HatState::Down,
+                which,
+                timestamp,
                 ..
-            } => store.dispatch(NextRom { step: 1 }),
-            Event::KeyUp {
-                keycode: Some(Keycode::Up),
+            } => lock_joystick!(which, timestamp, store, || store
+                .dispatch(NextRom { step: 1 })),
+            Event::JoyAxisMotion {
+                axis_idx: 1,
+                value,
+                which,
+                timestamp,
                 ..
+            } if value >= AXIS_THRESOLD =>
+            {
+                lock_joystick_axis!(which, timestamp, store, || store
+                    .dispatch(NextRom { step: 1 }))
             }
-            | Event::JoyHatMotion {
+            Event::JoyHatMotion {
                 state: HatState::Up,
+                which,
+                timestamp,
                 ..
-            } => store.dispatch(NextRom { step: -1 }),
-            Event::KeyUp {
-                keycode: Some(Keycode::Right),
+            } => lock_joystick!(which, timestamp, store, || store
+                .dispatch(NextRom { step: -1 })),
+            Event::JoyAxisMotion {
+                axis_idx: 1,
+                value,
+                which,
+                timestamp,
                 ..
+            } if value <= -AXIS_THRESOLD =>
+            {
+                lock_joystick_axis!(which, timestamp, store, || store
+                    .dispatch(NextRom { step: -1 }))
             }
-            | Event::JoyHatMotion {
+            Event::JoyHatMotion {
                 state: HatState::Right,
+                which,
+                timestamp,
                 ..
             } => if rom_selected == -1 {
-                store.dispatch(NextEmulator { step: 1 })
+                lock_joystick!(which, timestamp, store, || store
+                    .dispatch(NextEmulator { step: 1 }))
             } else {
-                store.dispatch(NextPage { step: 1 })
+                lock_joystick!(which, timestamp, store, || store
+                    .dispatch(NextPage { step: 1 }))
             },
-            Event::KeyUp {
-                keycode: Some(Keycode::Left),
+            Event::JoyAxisMotion {
+                axis_idx: 0,
+                value,
+                which,
+                timestamp,
                 ..
+            } if value >= AXIS_THRESOLD =>
+            {
+                if rom_selected == -1 {
+                    lock_joystick!(which, timestamp, store, || store
+                        .dispatch(NextEmulator { step: 1 }))
+                } else {
+                    lock_joystick!(which, timestamp, store, || store
+                        .dispatch(NextPage { step: 1 }))
+                }
             }
-            | Event::JoyHatMotion {
+            Event::JoyHatMotion {
                 state: HatState::Left,
+                which,
+                timestamp,
                 ..
             } => if rom_selected == -1 {
-                store.dispatch(NextEmulator { step: -1 })
+                lock_joystick!(which, timestamp, store, || store
+                    .dispatch(NextEmulator { step: -1 }))
             } else {
-                store.dispatch(NextPage { step: -1 })
+                lock_joystick!(which, timestamp, store, || store
+                    .dispatch(NextPage { step: -1 }))
             },
+            Event::JoyAxisMotion {
+                axis_idx: 0,
+                value,
+                which,
+                timestamp,
+                ..
+            } if value <= -AXIS_THRESOLD =>
+            {
+                if rom_selected == -1 {
+                    lock_joystick!(which, timestamp, store, || store
+                        .dispatch(NextEmulator { step: -1 }))
+                } else {
+                    lock_joystick!(which, timestamp, store, || store
+                        .dispatch(NextPage { step: -1 }))
+                }
+            }
             Event::JoyButtonUp {
                 button_idx: 0,
                 which,
@@ -330,13 +421,12 @@ impl Entity for PlayerGrabInput {
             0,
             line_height * self.player_index as i32 + line_height.wrapping_div(4),
         );
-        let ref controls = state.players[self.player_index]
+        let &(_, ref controls) = state.players[self.player_index]
             .as_ref()
             .unwrap()
             .grab_input
             .as_ref()
-            .unwrap()
-            .1;
+            .unwrap();
         let (_, ref input_display) =
             state.emulators[state.emulator_selected as usize].controls[controls.len()];
         resources
@@ -350,8 +440,35 @@ impl Entity for PlayerGrabInput {
         debug!("received event: {:?}", event);
         match *event {
             Event::JoyButtonUp {
-                which, button_idx, ..
-            } => store.dispatch(BindJoytstickButton(which, button_idx)),
+                which,
+                button_idx,
+                timestamp,
+                ..
+            } => lock_joystick!(which, timestamp, store, || store
+                .dispatch(BindJoytstickButton(which, button_idx))),
+            Event::JoyHatMotion {
+                which,
+                hat_idx,
+                state,
+                timestamp,
+                ..
+            } if state == HatState::Up || state == HatState::Down || state == HatState::Left
+                || state == HatState::Right =>
+            {
+                lock_joystick!(which, timestamp, store, || store
+                    .dispatch(BindJoytstickHat(which, hat_idx, state)))
+            }
+            Event::JoyAxisMotion {
+                which,
+                axis_idx,
+                value,
+                timestamp,
+                ..
+            } if value <= -AXIS_THRESOLD || value >= AXIS_THRESOLD =>
+            {
+                lock_joystick_axis!(which, timestamp, store, || store
+                    .dispatch(BindJoytstickAxis(which, axis_idx, value)))
+            }
             _ => return false,
         }
 
@@ -563,7 +680,8 @@ impl Meldnafen {
 impl Drop for Meldnafen {
     fn drop(&mut self) {
         info!("exiting...");
-        debug!("saving state: {:?}", self.store.get_state());
+        // TODO: state might be none in case of error
+        //debug!("saving state: {:?}", self.store.get_state());
         if let Err(err) = save_state(&mut self.store) {
             error!("could not write to save_sate: {}", err);
         }

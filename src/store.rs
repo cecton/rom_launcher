@@ -1,4 +1,5 @@
 use bincode::{deserialize, serialize, ErrorKind};
+use sdl2::joystick::HatState;
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
@@ -20,6 +21,28 @@ macro_rules! modify_player {
     };
 }
 
+macro_rules! retroarch_hat {
+    ($index:expr, $state:expr) => {
+        match $state {
+            HatState::Up => format!("h{}up", $index),
+            HatState::Down => format!("h{}down", $index),
+            HatState::Left => format!("h{}left", $index),
+            HatState::Right => format!("h{}right", $index),
+            _ => panic!("invalid hat value: {:?}", $state),
+        }
+    };
+}
+
+macro_rules! retroarch_axis {
+    ($index:expr, $value:expr) => {
+        if $value >= 0 {
+            format!("+{}", $index)
+        } else {
+            format!("-{}", $index)
+        }
+    };
+}
+
 /// The state of the application
 #[derive(Debug)]
 pub struct State {
@@ -32,6 +55,7 @@ pub struct State {
     pub rom_selected: i32,
     pub rom_count: i32,
     pub joysticks: HashMap<i32, JoystickInfo>,
+    pub last_joystick_action: HashMap<i32, u32>,
     pub players: [Option<Player>; 10],
     pub console_configs: JoystickConfig,
     pub game_configs: JoystickConfig,
@@ -163,6 +187,9 @@ pub enum Action {
     PrevPlayerMenu(i32),
     GoPlayerMenu(i32),
     BindJoytstickButton(i32, u8),
+    BindJoytstickHat(i32, u8, HatState),
+    BindJoytstickAxis(i32, u8, i16),
+    UpdateJoystickLastAction(i32, u32),
 }
 
 /// Reducer
@@ -383,7 +410,7 @@ fn reduce(state: State, action: Action) -> State {
             modify_player!(players, joystick_id, |_i: usize, player: &mut Player| {
                 let (control, mut mapping) = player.grab_input.take().unwrap();
                 if mapping.len() < controls_len {
-                    mapping.push(format!("but{}", button));
+                    mapping.push(format!("{}", button));
 
                     if mapping.len() == controls_len {
                         save_mapping = Some((control, mapping));
@@ -410,6 +437,97 @@ fn reduce(state: State, action: Action) -> State {
                 players,
                 console_configs,
                 game_configs,
+                ..state
+            }
+        }
+        BindJoytstickHat(joystick_id, index, hat_state) => {
+            use self::GrabControl::*;
+
+            let controls_len = state.get_controls().len();
+            let emulator_id = state.get_emulator().id.clone();
+            let rom = state.get_rom().file_name.clone();
+            let mut players = state.players;
+            let mut save_mapping = None;
+            modify_player!(players, joystick_id, |_i: usize, player: &mut Player| {
+                let (control, mut mapping) = player.grab_input.take().unwrap();
+                if mapping.len() < controls_len {
+                    mapping.push(retroarch_hat!(index, hat_state));
+
+                    if mapping.len() == controls_len {
+                        save_mapping = Some((control, mapping));
+                    } else {
+                        player.grab_input = Some((control, mapping));
+                    }
+                }
+            });
+
+            let mut console_configs = state.console_configs;
+            let mut game_configs = state.game_configs;
+            let guid = state.joysticks[&joystick_id].guid;
+            match save_mapping {
+                Some((Console, mapping)) => {
+                    console_configs.insert(guid, emulator_id, mapping);
+                }
+                Some((Game, mapping)) => {
+                    game_configs.insert(guid, rom, mapping);
+                }
+                _ => {}
+            }
+
+            State {
+                players,
+                console_configs,
+                game_configs,
+                ..state
+            }
+        }
+        BindJoytstickAxis(joystick_id, index, value) => {
+            use self::GrabControl::*;
+
+            let controls_len = state.get_controls().len();
+            let emulator_id = state.get_emulator().id.clone();
+            let rom = state.get_rom().file_name.clone();
+            let mut players = state.players;
+            let mut save_mapping = None;
+            modify_player!(players, joystick_id, |_i: usize, player: &mut Player| {
+                let (control, mut mapping) = player.grab_input.take().unwrap();
+                if mapping.len() < controls_len {
+                    mapping.push(retroarch_axis!(index, value));
+
+                    if mapping.len() == controls_len {
+                        save_mapping = Some((control, mapping));
+                    } else {
+                        player.grab_input = Some((control, mapping));
+                    }
+                }
+            });
+
+            let mut console_configs = state.console_configs;
+            let mut game_configs = state.game_configs;
+            let guid = state.joysticks[&joystick_id].guid;
+            match save_mapping {
+                Some((Console, mapping)) => {
+                    console_configs.insert(guid, emulator_id, mapping);
+                }
+                Some((Game, mapping)) => {
+                    game_configs.insert(guid, rom, mapping);
+                }
+                _ => {}
+            }
+
+            State {
+                players,
+                console_configs,
+                game_configs,
+                ..state
+            }
+        }
+        UpdateJoystickLastAction(joystick_id, timestamp) => {
+            let mut last_joystick_action = state.last_joystick_action;
+            last_joystick_action.insert(joystick_id, timestamp);
+
+            State {
+                last_joystick_action,
                 ..state
             }
         }
@@ -473,6 +591,7 @@ impl Store {
             rom_selected: -1,
             rom_count: 0,
             joysticks: HashMap::new(),
+            last_joystick_action: HashMap::new(),
             players: [None, None, None, None, None, None, None, None, None, None],
             console_configs: JoystickConfig::new(),
             game_configs: JoystickConfig::new(),
@@ -523,13 +642,17 @@ impl Store {
     }
 
     pub fn dump(&self) -> Result<Vec<u8>, Box<ErrorKind>> {
-        let state = self.state.as_ref().unwrap();
-        let save_state = SaveState {
-            emulator_selected: state.emulator_selected,
-        };
-        debug!("state dumped to: {:?}", save_state);
+        // TODO: state might be none in case of error
+        if let Some(state) = self.state.as_ref() {
+            let save_state = SaveState {
+                emulator_selected: state.emulator_selected,
+            };
+            debug!("state dumped to: {:?}", save_state);
 
-        serialize(&save_state)
+            serialize(&save_state)
+        } else {
+            Err(Box::new(ErrorKind::Custom("state is none".to_string())))
+        }
     }
 
     pub fn load(&mut self, serialized_state: &Vec<u8>) {
