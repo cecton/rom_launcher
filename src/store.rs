@@ -104,14 +104,15 @@ pub struct Rom {
     pub file_name: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AxisState {
     Positive,
     Negative,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum JoystickEvent {
+    Unassigned,
     Button(u8),
     Hat(u8, HatState),
     Axis(u8, AxisState),
@@ -402,7 +403,11 @@ fn reduce(state: State, action: Action) -> State {
                 let mut save_mapping = None;
                 let (control, mut mapping) = player.grab_input.take().unwrap();
                 if mapping.len() < controls_len {
-                    mapping.push(event);
+                    if mapping.iter().any(|x| *x == event) {
+                        mapping.push(JoystickEvent::Unassigned);
+                    } else {
+                        mapping.push(event);
+                    }
 
                     if mapping.len() == controls_len {
                         save_mapping = Some((control, mapping));
