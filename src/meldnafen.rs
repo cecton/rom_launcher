@@ -1,3 +1,4 @@
+use bincode::ErrorKind;
 use id_tree::*;
 use sdl2::event::Event;
 use sdl2::joystick::HatState;
@@ -707,16 +708,14 @@ impl Meldnafen {
 impl Drop for Meldnafen {
     fn drop(&mut self) {
         info!("exiting...");
-        // TODO: state might be none in case of error
-        //debug!("saving state: {:?}", self.store.get_state());
         if let Err(err) = save_state(&mut self.store) {
             error!("could not write to save_sate: {}", err);
         }
     }
 }
 
-fn save_state(store: &Store) -> Result<(), io::Error> {
-    let serialized_state = store.dump().expect("could not serialize state");
+fn save_state(store: &Store) -> Result<(), Box<ErrorKind>> {
+    let serialized_state = store.dump()?;
     let mut file = File::create("save_state")?;
     file.write_all(serialized_state.as_slice())?;
 

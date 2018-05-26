@@ -146,7 +146,7 @@ pub struct Player {
     pub grab_input: Option<(GrabControl, Vec<JoystickEvent>)>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PlayerMenu {
     Controls,
     Ready,
@@ -157,7 +157,7 @@ pub enum PlayerMenu {
     ControlsExit,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum GrabControl {
     Console,
     Game,
@@ -554,7 +554,6 @@ impl Store {
     }
 
     pub fn dump(&self) -> Result<Vec<u8>, Box<ErrorKind>> {
-        // TODO: state might be none in case of error
         if let Some(state) = self.state.as_ref() {
             let save_state = SaveState {
                 emulator_selected: state.emulator_selected,
