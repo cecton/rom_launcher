@@ -21,28 +21,6 @@ macro_rules! modify_player {
     };
 }
 
-macro_rules! retroarch_hat {
-    ($index:expr, $state:expr) => {
-        match $state {
-            HatState::Up => format!("h{}up", $index),
-            HatState::Down => format!("h{}down", $index),
-            HatState::Left => format!("h{}left", $index),
-            HatState::Right => format!("h{}right", $index),
-            _ => panic!("invalid hat value: {:?}", $state),
-        }
-    };
-}
-
-macro_rules! retroarch_axis {
-    ($index:expr, $value:expr) => {
-        if $value >= 0 {
-            format!("+{}", $index)
-        } else {
-            format!("-{}", $index)
-        }
-    };
-}
-
 /// The state of the application
 #[derive(Debug)]
 pub struct State {
@@ -127,14 +105,27 @@ pub struct Rom {
 }
 
 #[derive(Clone, Debug)]
-pub struct JoystickConfig(HashMap<JoystickGuid, HashMap<String, Vec<String>>>);
+pub enum AxisState {
+    Positive,
+    Negative,
+}
+
+#[derive(Clone, Debug)]
+pub enum JoystickEvent {
+    Button(u8),
+    Hat(u8, HatState),
+    Axis(u8, AxisState),
+}
+
+#[derive(Clone, Debug)]
+pub struct JoystickConfig(HashMap<JoystickGuid, HashMap<String, Vec<JoystickEvent>>>);
 
 impl JoystickConfig {
     fn new() -> JoystickConfig {
         JoystickConfig(HashMap::new())
     }
 
-    pub fn insert(&mut self, guid: JoystickGuid, key: String, mapping: Vec<String>) {
+    pub fn insert(&mut self, guid: JoystickGuid, key: String, mapping: Vec<JoystickEvent>) {
         if !self.0.contains_key(&guid) {
             self.0.insert(guid, HashMap::new());
         }
@@ -151,7 +142,7 @@ impl JoystickConfig {
 pub struct Player {
     pub joystick: i32,
     pub menu: PlayerMenu,
-    pub grab_input: Option<(GrabControl, Vec<String>)>,
+    pub grab_input: Option<(GrabControl, Vec<JoystickEvent>)>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -186,9 +177,7 @@ pub enum Action {
     NextPlayerMenu(i32),
     PrevPlayerMenu(i32),
     GoPlayerMenu(i32),
-    BindJoytstickButton(i32, u8),
-    BindJoytstickHat(i32, u8, HatState),
-    BindJoytstickAxis(i32, u8, i16),
+    BindPlayerJoystickEvent(usize, JoystickEvent),
     UpdateJoystickLastAction(i32, u32),
 }
 
@@ -399,120 +388,38 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        BindJoytstickButton(joystick_id, button) => {
+        BindPlayerJoystickEvent(i, event) => {
             use self::GrabControl::*;
 
             let controls_len = state.get_controls().len();
             let emulator_id = state.get_emulator().id.clone();
             let rom = state.get_rom().file_name.clone();
             let mut players = state.players;
-            let mut save_mapping = None;
-            modify_player!(players, joystick_id, |_i: usize, player: &mut Player| {
+            let mut console_configs = state.console_configs;
+            let mut game_configs = state.game_configs;
+            if let Some(player) = players[i].as_mut() {
+                let guid = state.joysticks[&player.joystick].guid;
+                let mut save_mapping = None;
                 let (control, mut mapping) = player.grab_input.take().unwrap();
                 if mapping.len() < controls_len {
-                    mapping.push(format!("{}", button));
+                    mapping.push(event);
 
                     if mapping.len() == controls_len {
                         save_mapping = Some((control, mapping));
                     } else {
                         player.grab_input = Some((control, mapping));
                     }
-                }
-            });
 
-            let mut console_configs = state.console_configs;
-            let mut game_configs = state.game_configs;
-            let guid = state.joysticks[&joystick_id].guid;
-            match save_mapping {
-                Some((Console, mapping)) => {
-                    console_configs.insert(guid, emulator_id, mapping);
-                }
-                Some((Game, mapping)) => {
-                    game_configs.insert(guid, rom, mapping);
-                }
-                _ => {}
-            }
-
-            State {
-                players,
-                console_configs,
-                game_configs,
-                ..state
-            }
-        }
-        BindJoytstickHat(joystick_id, index, hat_state) => {
-            use self::GrabControl::*;
-
-            let controls_len = state.get_controls().len();
-            let emulator_id = state.get_emulator().id.clone();
-            let rom = state.get_rom().file_name.clone();
-            let mut players = state.players;
-            let mut save_mapping = None;
-            modify_player!(players, joystick_id, |_i: usize, player: &mut Player| {
-                let (control, mut mapping) = player.grab_input.take().unwrap();
-                if mapping.len() < controls_len {
-                    mapping.push(retroarch_hat!(index, hat_state));
-
-                    if mapping.len() == controls_len {
-                        save_mapping = Some((control, mapping));
-                    } else {
-                        player.grab_input = Some((control, mapping));
+                    match save_mapping {
+                        Some((Console, mapping)) => {
+                            console_configs.insert(guid, emulator_id, mapping);
+                        }
+                        Some((Game, mapping)) => {
+                            game_configs.insert(guid, rom, mapping);
+                        }
+                        _ => {}
                     }
                 }
-            });
-
-            let mut console_configs = state.console_configs;
-            let mut game_configs = state.game_configs;
-            let guid = state.joysticks[&joystick_id].guid;
-            match save_mapping {
-                Some((Console, mapping)) => {
-                    console_configs.insert(guid, emulator_id, mapping);
-                }
-                Some((Game, mapping)) => {
-                    game_configs.insert(guid, rom, mapping);
-                }
-                _ => {}
-            }
-
-            State {
-                players,
-                console_configs,
-                game_configs,
-                ..state
-            }
-        }
-        BindJoytstickAxis(joystick_id, index, value) => {
-            use self::GrabControl::*;
-
-            let controls_len = state.get_controls().len();
-            let emulator_id = state.get_emulator().id.clone();
-            let rom = state.get_rom().file_name.clone();
-            let mut players = state.players;
-            let mut save_mapping = None;
-            modify_player!(players, joystick_id, |_i: usize, player: &mut Player| {
-                let (control, mut mapping) = player.grab_input.take().unwrap();
-                if mapping.len() < controls_len {
-                    mapping.push(retroarch_axis!(index, value));
-
-                    if mapping.len() == controls_len {
-                        save_mapping = Some((control, mapping));
-                    } else {
-                        player.grab_input = Some((control, mapping));
-                    }
-                }
-            });
-
-            let mut console_configs = state.console_configs;
-            let mut game_configs = state.game_configs;
-            let guid = state.joysticks[&joystick_id].guid;
-            match save_mapping {
-                Some((Console, mapping)) => {
-                    console_configs.insert(guid, emulator_id, mapping);
-                }
-                Some((Game, mapping)) => {
-                    game_configs.insert(guid, rom, mapping);
-                }
-                _ => {}
             }
 
             State {

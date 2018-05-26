@@ -69,6 +69,15 @@ macro_rules! lock_joystick_axis {
     };
 }
 
+macro_rules! filter_player {
+    ($store:expr, $player_index:expr, $joystick:expr) => {
+        $store.get_state().players[$player_index]
+            .as_ref()
+            .unwrap()
+            .joystick == $joystick;
+    };
+}
+
 pub trait Entity {
     fn is_active(&self, _state: &State) -> bool;
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources);
@@ -435,28 +444,34 @@ impl Entity for PlayerGrabInput {
     }
 
     fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
+        use self::JoystickEvent::*;
         use store::Action::*;
 
-        debug!("received event: {:?}", event);
         match *event {
             Event::JoyButtonUp {
                 which,
                 button_idx,
                 timestamp,
                 ..
-            } => lock_joystick!(which, timestamp, store, || store
-                .dispatch(BindJoytstickButton(which, button_idx))),
+            } if filter_player!(store, self.player_index, which) =>
+            {
+                lock_joystick!(which, timestamp, store, || store.dispatch(
+                    BindPlayerJoystickEvent(self.player_index, Button(button_idx))
+                ))
+            }
             Event::JoyHatMotion {
                 which,
                 hat_idx,
                 state,
                 timestamp,
                 ..
-            } if state == HatState::Up || state == HatState::Down || state == HatState::Left
-                || state == HatState::Right =>
+            } if filter_player!(store, self.player_index, which)
+                && (state == HatState::Up || state == HatState::Down || state == HatState::Left
+                    || state == HatState::Right) =>
             {
-                lock_joystick!(which, timestamp, store, || store
-                    .dispatch(BindJoytstickHat(which, hat_idx, state)))
+                lock_joystick!(which, timestamp, store, || store.dispatch(
+                    BindPlayerJoystickEvent(self.player_index, Hat(hat_idx, state))
+                ))
             }
             Event::JoyAxisMotion {
                 which,
@@ -464,10 +479,22 @@ impl Entity for PlayerGrabInput {
                 value,
                 timestamp,
                 ..
-            } if value <= -AXIS_THRESOLD || value >= AXIS_THRESOLD =>
+            } if filter_player!(store, self.player_index, which)
+                && (value <= -AXIS_THRESOLD || value >= AXIS_THRESOLD) =>
             {
-                lock_joystick_axis!(which, timestamp, store, || store
-                    .dispatch(BindJoytstickAxis(which, axis_idx, value)))
+                lock_joystick_axis!(which, timestamp, store, || store.dispatch(
+                    BindPlayerJoystickEvent(
+                        self.player_index,
+                        Axis(
+                            axis_idx,
+                            if value.is_positive() {
+                                AxisState::Positive
+                            } else {
+                                AxisState::Negative
+                            }
+                        )
+                    )
+                ))
             }
             _ => return false,
         }
