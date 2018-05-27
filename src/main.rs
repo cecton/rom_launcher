@@ -14,7 +14,7 @@ use log::LevelFilter;
 mod app;
 mod draw;
 mod joystick;
-mod meldnafen;
+mod rom_launcher;
 mod store;
 
 pub fn main() {
@@ -25,8 +25,8 @@ pub fn main() {
     let mut command;
     loop {
         {
-            let mut meldnafen = meldnafen::Meldnafen::new();
-            command = meldnafen.run_loop();
+            let mut romlauncher = rom_launcher::ROMLauncher::new();
+            command = romlauncher.run_loop();
         }
 
         if command.is_none() {

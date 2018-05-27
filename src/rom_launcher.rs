@@ -100,7 +100,7 @@ impl Entity for List {
         }
         resources
             .font
-            .println(canvas, &format!("< {} >", state.get_emulator().name));
+            .println(canvas, &format!("< {: ^38} >", state.get_emulator().name));
         resources.font.println(canvas, "");
 
         resources.font.texture.set_color_mod(255, 255, 255);
@@ -118,6 +118,9 @@ impl Entity for List {
                     if i as i32 == state.rom_selected {
                         resources.font.texture.set_color_mod(255, 255, 255);
                     }
+                }
+                for i in 0..(PAGE_SIZE - (roms.len() as i32 - state.page_index * PAGE_SIZE)) {
+                    resources.font.println(canvas, "");
                 }
                 resources.font.println(canvas, "");
                 resources.font.println(
@@ -670,25 +673,25 @@ pub struct Resources {
     font: Font,
 }
 
-pub struct Meldnafen {
+pub struct ROMLauncher {
     pub app: App,
     store: Store,
     resources: Resources,
     tree: Tree<Box<Entity>>,
 }
 
-impl Meldnafen {
-    pub fn new() -> Meldnafen {
+impl ROMLauncher {
+    pub fn new() -> ROMLauncher {
         let mut app = App::new(|video| {
             video
-                .window("meldnafen", 800, 700)
+                .window("ROMLauncher", 800, 700)
                 .position(0, 0)
                 .borderless()
                 .build()
         });
         app.sdl_context.mouse().show_cursor(false);
         let mut store = Store::new();
-        Meldnafen::load_state(&mut store);
+        ROMLauncher::load_state(&mut store);
         store.dispatch(Action::NextEmulator {
             timestamp: 0,
             step: 0,
@@ -709,7 +712,7 @@ impl Meldnafen {
         let resources = Self::load_resources(&app);
         let tree = Self::load_entites();
 
-        Meldnafen {
+        ROMLauncher {
             app,
             store,
             resources,
@@ -827,7 +830,7 @@ impl Meldnafen {
     }
 }
 
-impl Drop for Meldnafen {
+impl Drop for ROMLauncher {
     fn drop(&mut self) {
         info!("exiting...");
         if let Err(err) = save_state(&mut self.store) {

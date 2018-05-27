@@ -1,5 +1,5 @@
 [package]
-name = "meldnafen"
+name = "rom_launcher"
 version = "0.1.0"
 authors = ["Cecile Tonglet <cecile.tonglet@gmail.com>"]
 build = "build.rs"
