@@ -25,11 +25,11 @@ const JOYSTICK_LOCK_TIME: u32 = 100;
 const JOYSTICK_LOCK_TIME_AXIS: u32 = 200;
 
 macro_rules! set_highlight {
-    ($font:expr, $value:expr) => {
+    ($canvas:expr, $font:expr, $value:expr) => {
         if $value {
-            $font.texture.set_color_mod(255, 255, 0);
+            $font.print($canvas, "  > ");
         } else {
-            $font.texture.set_color_mod(255, 255, 255);
+            $font.print($canvas, "    ");
         }
     };
 }
@@ -342,41 +342,43 @@ impl Entity for PlayerMenu {
         );
         resources
             .font
-            .print(canvas, &format!(" {:2} >   ", actual_player_index + 1));
+            .print(canvas, &format!("{:2}", actual_player_index + 1));
 
         match player.menu {
             Controls | Ready | Leave => {
-                set_highlight!(resources.font, player.menu == Controls);
+                set_highlight!(canvas, resources.font, player.menu == Controls);
                 resources.font.print(canvas, "Controls");
                 if (self.player_index == 0 && state.any_player_needs_setup_controls())
                     || state.player_needs_setup_controls(self.player_index)
                 {
                     resources.font.texture.set_color_mod(0, 0, 0);
                 } else {
-                    set_highlight!(resources.font, player.menu == Ready);
+                    set_highlight!(canvas, resources.font, player.menu == Ready);
                 }
                 if self.player_index == 0 {
-                    resources.font.print(canvas, "   Start");
+                    resources.font.print(canvas, "Start          ");
                 } else {
-                    resources.font.print(canvas, "   Ready");
+                    resources.font.print(canvas, "Ready          ");
                 }
-                set_highlight!(resources.font, player.menu == Leave);
+                set_highlight!(canvas, resources.font, player.menu == Leave);
                 if self.player_index == 0 {
-                    resources.font.print(canvas, "            Exit");
+                    resources.font.print(canvas, "Exit");
                 } else {
-                    resources.font.print(canvas, "            Leave");
+                    resources.font.print(canvas, "Leave");
                 }
             }
-            ConsoleControls | GameControls | ControlsExit => {
-                set_highlight!(resources.font, player.menu == ConsoleControls);
+            ConsoleControls | GameControls | ClearConsoleControls | ControlsExit => {
+                set_highlight!(canvas, resources.font, player.menu == ConsoleControls);
                 resources.font.print(canvas, "Console");
-                set_highlight!(resources.font, player.menu == GameControls);
-                resources.font.print(canvas, "    Game");
-                set_highlight!(resources.font, player.menu == ControlsExit);
-                resources.font.print(canvas, "             Back");
+                set_highlight!(canvas, resources.font, player.menu == GameControls);
+                resources.font.print(canvas, "Game");
+                set_highlight!(canvas, resources.font, player.menu == ClearConsoleControls);
+                resources.font.print(canvas, "Clear   ");
+                set_highlight!(canvas, resources.font, player.menu == ControlsExit);
+                resources.font.print(canvas, "Back");
             }
             Waiting => {
-                set_highlight!(resources.font, true);
+                set_highlight!(canvas, resources.font, true);
                 resources.font.print(canvas, "Waiting");
             }
         }
@@ -648,6 +650,8 @@ impl Entity for Root {
                 which, timestamp, ..
             } => {
                 if let Some(info) = app.open_joystick(which) {
+                    // TODO: maybe restart the application after a joystick has
+                    //       been detected to ensure the correct joystick order
                     store.dispatch(AddJoystick(timestamp, info));
                 }
             }

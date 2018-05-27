@@ -147,16 +147,35 @@ impl JoystickConfig {
         JoystickConfig(HashMap::new())
     }
 
-    pub fn insert(&mut self, guid: JoystickGuid, key: String, mapping: Vec<JoystickEvent>) {
+    pub fn insert(
+        &mut self,
+        guid: JoystickGuid,
+        key: String,
+        mapping: Vec<JoystickEvent>,
+    ) -> Option<Vec<JoystickEvent>> {
         if !self.0.contains_key(&guid) {
             self.0.insert(guid, HashMap::new());
         }
 
-        self.0.get_mut(&guid).unwrap().insert(key, mapping);
+        self.0.get_mut(&guid).unwrap().insert(key, mapping)
     }
 
     pub fn contains_key(&self, guid: &JoystickGuid, key: &str) -> bool {
         self.0.contains_key(guid) && self.0.get(guid).unwrap().contains_key(key)
+    }
+
+    pub fn remove(&mut self, guid: JoystickGuid, key: String) -> Option<Vec<JoystickEvent>> {
+        if !self.0.contains_key(&guid) {
+            return None;
+        }
+
+        let res = self.0.get_mut(&guid).unwrap().remove(&key);
+
+        if self.0.get(&guid).unwrap().len() == 0 {
+            self.0.remove(&guid);
+        }
+
+        res
     }
 }
 
@@ -176,6 +195,7 @@ pub enum PlayerMenu {
     Waiting,
     ConsoleControls,
     GameControls,
+    ClearConsoleControls,
     ControlsExit,
 }
 
@@ -378,7 +398,8 @@ fn reduce(state: State, action: Action) -> State {
                         player.menu = Ready;
                     },
                     ConsoleControls => player.menu = GameControls,
-                    GameControls => player.menu = ControlsExit,
+                    GameControls => player.menu = ClearConsoleControls,
+                    ClearConsoleControls => player.menu = ControlsExit,
                     _ => {}
                 }
             }
@@ -404,7 +425,8 @@ fn reduce(state: State, action: Action) -> State {
                     },
                     Ready => player.menu = Controls,
                     GameControls => player.menu = ConsoleControls,
-                    ControlsExit => player.menu = GameControls,
+                    ClearConsoleControls => player.menu = GameControls,
+                    ControlsExit => player.menu = ClearConsoleControls,
                     _ => {}
                 }
             }
@@ -419,9 +441,12 @@ fn reduce(state: State, action: Action) -> State {
             use self::GrabControl::*;
             use self::PlayerMenu::*;
 
+            let rom = state.get_rom().file_name.clone();
             let mut screen = state.screen;
             let mut players = state.players;
+            let mut game_configs = state.game_configs;
             let mut remove_player = None;
+            let mut clear_game_config = None;
             modify_player!(
                 players,
                 joystick_id,
@@ -436,6 +461,7 @@ fn reduce(state: State, action: Action) -> State {
                     ControlsExit => player.menu = Controls,
                     Leave => remove_player = Some(i),
                     ConsoleControls => player.grab_input = Some((Console, Vec::new())),
+                    ClearConsoleControls => clear_game_config = Some(player.joystick),
                     GameControls => player.grab_input = Some((Game, Vec::new())),
                 }
             );
@@ -446,10 +472,16 @@ fn reduce(state: State, action: Action) -> State {
                 None => {}
             }
 
+            if let Some(joystick) = clear_game_config {
+                let guid = state.joysticks[&joystick].guid;
+                game_configs.remove(guid, rom);
+            }
+
             State {
                 timestamp,
                 screen,
                 players,
+                game_configs,
                 ..state
             }
         }
