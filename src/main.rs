@@ -1,4 +1,3 @@
-extern crate bincode;
 extern crate env_logger;
 extern crate id_tree;
 #[macro_use]
@@ -7,6 +6,7 @@ extern crate sdl2;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate serde_json;
 
 use env_logger::Builder;
 use log::LevelFilter;

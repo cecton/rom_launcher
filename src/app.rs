@@ -61,7 +61,13 @@ impl App {
         match self.joystick.open(which) {
             Ok(joystick) => {
                 let id = joystick.instance_id();
-                info!("added new joystick: {}", joystick.name());
+                info!(
+                    "added new joystick: {} ({} buttons, {} axes, {} hats)",
+                    joystick.name(),
+                    joystick.num_buttons(),
+                    joystick.num_axes(),
+                    joystick.num_hats()
+                );
                 let index = self.opened_joysticks
                     .values()
                     .filter(|x| x.guid() == joystick.guid() && x.attached())

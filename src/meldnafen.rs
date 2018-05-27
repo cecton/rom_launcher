@@ -1,4 +1,3 @@
-use bincode::ErrorKind;
 use id_tree::*;
 use sdl2::event::Event;
 use sdl2::joystick::HatState;
@@ -15,6 +14,7 @@ use std::io::prelude::*;
 
 use app::*;
 use draw::*;
+use store;
 use store::*;
 
 const ENTITES: usize = 23;
@@ -311,7 +311,7 @@ struct PlayerMenu {
 impl Entity for PlayerMenu {
     fn is_active(&self, state: &State) -> bool {
         if let Some(ref player) = state.players[self.player_index] {
-            if player.grab_input.is_none() {
+            if player.grab_input.is_none() && player.grab_emulator_buttons.is_none() {
                 return true;
             }
         }
@@ -346,12 +346,18 @@ impl Entity for PlayerMenu {
             Controls | Ready | Leave => {
                 set_highlight!(resources.font, player.menu == Controls);
                 resources.font.print(canvas, "Controls");
-                if state.player_needs_setup_controls(self.player_index) {
+                if (self.player_index == 0 && state.any_player_needs_setup_controls())
+                    || state.player_needs_setup_controls(self.player_index)
+                {
                     resources.font.texture.set_color_mod(0, 0, 0);
                 } else {
                     set_highlight!(resources.font, player.menu == Ready);
                 }
-                resources.font.print(canvas, "   Ready");
+                if self.player_index == 0 {
+                    resources.font.print(canvas, "   Start");
+                } else {
+                    resources.font.print(canvas, "   Ready");
+                }
                 set_highlight!(resources.font, player.menu == Leave);
                 if self.player_index == 0 {
                     resources.font.print(canvas, "            Exit");
@@ -396,6 +402,17 @@ impl Entity for PlayerMenu {
             } => if player_joystick == which {
                 store.dispatch(NextPlayerMenu(which));
             },
+            Event::JoyAxisMotion {
+                axis_idx: 0,
+                value,
+                which,
+                timestamp,
+                ..
+            } if value >= AXIS_THRESOLD =>
+            {
+                lock_joystick!(which, timestamp, store, || store
+                    .dispatch(NextPlayerMenu(which)))
+            }
             Event::JoyHatMotion {
                 which,
                 state: HatState::Left,
@@ -403,6 +420,17 @@ impl Entity for PlayerMenu {
             } => if player_joystick == which {
                 store.dispatch(PrevPlayerMenu(which));
             },
+            Event::JoyAxisMotion {
+                axis_idx: 0,
+                value,
+                which,
+                timestamp,
+                ..
+            } if value <= -AXIS_THRESOLD =>
+            {
+                lock_joystick!(which, timestamp, store, || store
+                    .dispatch(PrevPlayerMenu(which)))
+            }
             _ => return false,
         }
 
@@ -471,7 +499,19 @@ impl Entity for PlayerGrabInput {
                     || state == HatState::Right) =>
             {
                 lock_joystick!(which, timestamp, store, || store.dispatch(
-                    BindPlayerJoystickEvent(self.player_index, Hat(hat_idx, state))
+                    BindPlayerJoystickEvent(
+                        self.player_index,
+                        Hat(
+                            hat_idx,
+                            match state {
+                                HatState::Up => store::HatState::Up,
+                                HatState::Down => store::HatState::Down,
+                                HatState::Left => store::HatState::Left,
+                                HatState::Right => store::HatState::Right,
+                                _ => panic!("invalid state: {:?}", state),
+                            }
+                        )
+                    )
                 ))
             }
             Event::JoyAxisMotion {
@@ -496,6 +536,80 @@ impl Entity for PlayerGrabInput {
                         )
                     )
                 ))
+            }
+            _ => return false,
+        }
+
+        true
+    }
+}
+
+struct PlayerGrabEmulatorButtons;
+
+impl Entity for PlayerGrabEmulatorButtons {
+    fn is_active(&self, state: &State) -> bool {
+        state.players[0]
+            .as_ref()
+            .and_then(|x| x.grab_emulator_buttons.as_ref())
+            .is_some()
+    }
+
+    #[allow(unused_must_use)]
+    fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
+        resources.font.set_line_spacing(1.50);
+        let line_height = resources.font.line_height;
+        resources.font.texture.set_color_mod(255, 255, 255);
+        resources.font.set_pos(0, line_height.wrapping_div(4));
+        let &(ref hotkey, ref menu) = state.players[0]
+            .as_ref()
+            .unwrap()
+            .grab_emulator_buttons
+            .as_ref()
+            .unwrap();
+        if hotkey.is_none() {
+            resources
+                .font
+                .println(canvas, "    Press button for: emulator hotkey");
+        } else if menu.is_none() {
+            resources
+                .font
+                .println(canvas, "    Press button for: emulator menu");
+        }
+    }
+
+    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
+        use self::JoystickEvent::*;
+        use store::Action::*;
+
+        match *event {
+            Event::JoyButtonUp {
+                which,
+                button_idx,
+                timestamp,
+                ..
+            } if filter_player!(store, 0, which) =>
+            {
+                let hotkey = store.get_state().players[0]
+                    .as_ref()
+                    .unwrap()
+                    .grab_emulator_buttons
+                    .as_ref()
+                    .unwrap()
+                    .0
+                    .clone();
+                lock_joystick!(which, timestamp, store, || {
+                    let new_joystick_event = Button(button_idx);
+
+                    if let Some(joystick_event) = hotkey {
+                        if joystick_event == new_joystick_event {
+                            return;
+                        }
+
+                        app.quit();
+                    }
+
+                    store.dispatch(BindEmulatorButton(new_joystick_event));
+                })
             }
             _ => return false,
         }
@@ -568,9 +682,8 @@ impl Meldnafen {
         });
         app.sdl_context.mouse().show_cursor(false);
         let mut store = Store::new();
-        if let Err(err) = Meldnafen::load_state(&mut store) {
-            error!("could not load state: {}", err);
-        }
+        Meldnafen::load_state(&mut store);
+        store.dispatch(Action::NextEmulator { step: 0 });
 
         debug!("setting up canvas...");
         let (w, h) = app.canvas.output_size().unwrap();
@@ -596,10 +709,8 @@ impl Meldnafen {
     }
 
     fn load_state(store: &mut Store) -> Result<(), io::Error> {
-        let mut file = File::open("save_state")?;
-        let mut serialized_state: Vec<u8> = vec![];
-        file.read_to_end(&mut serialized_state)?;
-        store.load(&serialized_state);
+        let file = File::open("state.json")?;
+        store.load(file);
 
         Ok(())
     }
@@ -647,6 +758,10 @@ impl Meldnafen {
                 UnderNode(&game_launcher),
             );
         }
+        tree.insert(
+            Node::new(Box::new(PlayerGrabEmulatorButtons)),
+            UnderNode(&game_launcher),
+        );
 
         tree
     }
@@ -714,10 +829,11 @@ impl Drop for Meldnafen {
     }
 }
 
-fn save_state(store: &Store) -> Result<(), Box<ErrorKind>> {
-    let serialized_state = store.dump()?;
-    let mut file = File::create("save_state")?;
-    file.write_all(serialized_state.as_slice())?;
+fn save_state(store: &Store) -> Result<(), String> {
+    let serialized_state = store.dump().map_err(|x| format!("{}", x))?;
+    let mut file = File::create("state.json").map_err(|x| format!("{}", x))?;
+    file.write_all(serialized_state.as_slice())
+        .map_err(|x| format!("{}", x))?;
 
     Ok(())
 }

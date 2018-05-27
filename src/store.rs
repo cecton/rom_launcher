@@ -1,9 +1,6 @@
-use bincode::{deserialize, serialize, ErrorKind};
-use sdl2::joystick::HatState;
+use serde_json;
+use std;
 use std::collections::HashMap;
-use std::env;
-use std::error::Error;
-use std::fs;
 
 use joystick::*;
 
@@ -64,8 +61,13 @@ impl State {
     }
 
     pub fn player_needs_setup_controls(&self, player_index: usize) -> bool {
-        let joystick_id = &self.players[player_index].as_ref().unwrap().joystick;
-        self.joystick_needs_setup_controls(*joystick_id)
+        match self.players[player_index].as_ref() {
+            Some(player) => {
+                let joystick_id = &player.joystick;
+                self.joystick_needs_setup_controls(*joystick_id)
+            }
+            None => false,
+        }
     }
 
     pub fn joystick_needs_setup_controls(&self, joystick_id: i32) -> bool {
@@ -76,11 +78,21 @@ impl State {
         !self.console_configs.contains_key(guid, emulator_id)
             && !self.game_configs.contains_key(guid, rom)
     }
+
+    pub fn any_player_needs_setup_controls(&self) -> bool {
+        self.players
+            .iter()
+            .enumerate()
+            .any(|(i, _)| self.player_needs_setup_controls(i))
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SaveState {
-    pub emulator_selected: i32,
+    emulator_selected: i32,
+    emulators: Vec<Emulator>,
+    console_configs: JoystickConfig,
+    game_configs: JoystickConfig,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -89,7 +101,7 @@ pub enum Screen {
     GameLauncher,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Emulator {
     pub id: String,
     pub name: String,
@@ -104,13 +116,21 @@ pub struct Rom {
     pub file_name: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum HatState {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum AxisState {
     Positive,
     Negative,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum JoystickEvent {
     Unassigned,
     Button(u8),
@@ -118,7 +138,7 @@ pub enum JoystickEvent {
     Axis(u8, AxisState),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct JoystickConfig(HashMap<JoystickGuid, HashMap<String, Vec<JoystickEvent>>>);
 
 impl JoystickConfig {
@@ -144,6 +164,7 @@ pub struct Player {
     pub joystick: i32,
     pub menu: PlayerMenu,
     pub grab_input: Option<(GrabControl, Vec<JoystickEvent>)>,
+    pub grab_emulator_buttons: Option<(Option<JoystickEvent>, Option<JoystickEvent>)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -180,6 +201,7 @@ pub enum Action {
     GoPlayerMenu(i32),
     BindPlayerJoystickEvent(usize, JoystickEvent),
     UpdateJoystickLastAction(i32, u32),
+    BindEmulatorButton(JoystickEvent),
 }
 
 /// Reducer
@@ -189,6 +211,9 @@ fn reduce(state: State, action: Action) -> State {
     match action {
         Initialize(save_state) => State {
             emulator_selected: save_state.emulator_selected,
+            emulators: save_state.emulators,
+            console_configs: save_state.console_configs,
+            game_configs: save_state.game_configs,
             ..state
         },
         LoadRoms { roms } => {
@@ -296,6 +321,14 @@ fn reduce(state: State, action: Action) -> State {
         AddPlayer(joystick) => match state.players.iter().position(|x| x.is_none()) {
             None => state,
             Some(free_slot) => {
+                if state.players[0]
+                    .as_ref()
+                    .and_then(|x| x.grab_emulator_buttons.as_ref())
+                    .is_some()
+                {
+                    return state;
+                }
+
                 let player_needs_setup_controls = state.joystick_needs_setup_controls(joystick);
                 let mut players = state.players;
 
@@ -307,6 +340,7 @@ fn reduce(state: State, action: Action) -> State {
                         PlayerMenu::Ready
                     },
                     grab_input: None,
+                    grab_emulator_buttons: None,
                 });
 
                 State { players, ..state }
@@ -367,7 +401,11 @@ fn reduce(state: State, action: Action) -> State {
                 players,
                 joystick_id,
                 |i: usize, player: &mut Player| match player.menu {
-                    Ready => player.menu = Waiting,
+                    Ready => if i == 0 {
+                        player.grab_emulator_buttons = Some((None, None));
+                    } else {
+                        player.menu = Waiting;
+                    },
                     Waiting => player.menu = Ready,
                     Controls => player.menu = ConsoleControls,
                     ControlsExit => player.menu = Controls,
@@ -442,6 +480,22 @@ fn reduce(state: State, action: Action) -> State {
                 last_joystick_action,
                 ..state
             }
+        }
+        BindEmulatorButton(event) => {
+            let mut players = state.players;
+
+            if let Some(player) = players[0].as_mut() {
+                let (hotkey, menu) = player.grab_emulator_buttons.take().unwrap();
+
+                if hotkey.is_none() {
+                    player.grab_emulator_buttons = Some((Some(event), menu));
+                } else if menu.is_none() {
+                    player.grab_emulator_buttons = Some((hotkey, Some(event)));
+                    player.menu = PlayerMenu::Waiting;
+                }
+            }
+
+            State { players, ..state }
         }
     }
 }
@@ -553,25 +607,36 @@ impl Store {
         self.state.as_ref().unwrap()
     }
 
-    pub fn dump(&self) -> Result<Vec<u8>, Box<ErrorKind>> {
+    pub fn dump(&self) -> Result<Vec<u8>, String> {
         if let Some(state) = self.state.as_ref() {
             let save_state = SaveState {
                 emulator_selected: state.emulator_selected,
+                emulators: state.emulators.clone(),
+                console_configs: state.console_configs.clone(),
+                game_configs: state.game_configs.clone(),
             };
             debug!("state dumped to: {:?}", save_state);
 
-            serialize(&save_state)
+            Ok(serde_json::to_string(&save_state)
+                .map_err(|x| format!("{}", x))?
+                .into_bytes())
         } else {
-            Err(Box::new(ErrorKind::Custom("state is none".to_string())))
+            Err("state is none".to_string())
         }
     }
 
-    pub fn load(&mut self, serialized_state: &Vec<u8>) {
-        let save_state: SaveState = deserialize(serialized_state).expect("could not load state");
-        debug!("state loaded: {:?}", save_state);
-
-        self.dispatch(Action::Initialize(save_state));
-        self.process();
+    pub fn load<R>(&mut self, reader: R)
+    where
+        R: std::io::Read,
+    {
+        match serde_json::from_reader(reader) {
+            Ok(save_state) => {
+                debug!("state loaded: {:?}", save_state);
+                self.dispatch(Action::Initialize(save_state));
+                self.process();
+            }
+            Err(err) => panic!("could not load state: {}", err),
+        }
     }
 }
 
@@ -604,9 +669,9 @@ fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
 }
 
 fn get_roms(path: &str) -> Result<Vec<Rom>, String> {
-    let resolved_path = path.replace("~", env::home_dir().unwrap().to_str().unwrap());
-    let mut roms = fs::read_dir(resolved_path)
-        .or_else(|x| Err(String::from(x.description())))?
+    let resolved_path = path.replace("~", std::env::home_dir().unwrap().to_str().unwrap());
+    let mut roms = std::fs::read_dir(resolved_path)
+        .or_else(|x| Err(format!("{}", x)))?
         .map(|x| x.unwrap().path())
         .filter(|x| x.is_file())
         .map(|x| Rom {
