@@ -44,10 +44,8 @@ macro_rules! lock_joystick {
                 .or(Some(&0))
                 .unwrap() + JOYSTICK_LOCK_TIME
         {
-            $store.dispatch(Action::UpdateJoystickLastAction($joystick, $timestamp));
+            $store.dispatch(Action::UpdateJoystickLastAction($timestamp, $joystick));
             $closure();
-        } else {
-            return false;
         }
     };
 }
@@ -62,10 +60,8 @@ macro_rules! lock_joystick_axis {
                 .or(Some(&0))
                 .unwrap() + JOYSTICK_LOCK_TIME_AXIS
         {
-            $store.dispatch(Action::UpdateJoystickLastAction($joystick, $timestamp));
+            $store.dispatch(Action::UpdateJoystickLastAction($timestamp, $joystick));
             $closure();
-        } else {
-            return false;
         }
     };
 }
@@ -82,7 +78,7 @@ macro_rules! filter_player {
 pub trait Entity {
     fn is_active(&self, _state: &State) -> bool;
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources);
-    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool;
+    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store);
 }
 
 struct List {}
@@ -141,7 +137,7 @@ impl Entity for List {
         }
     }
 
-    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
+    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) {
         use store::Action::*;
         let rom_selected = store.get_state().rom_selected;
 
@@ -152,7 +148,7 @@ impl Entity for List {
                 timestamp,
                 ..
             } => lock_joystick!(which, timestamp, store, || store
-                .dispatch(NextRom { step: 1 })),
+                .dispatch(NextRom { timestamp, step: 1 })),
             Event::JoyAxisMotion {
                 axis_idx: 1,
                 value,
@@ -162,15 +158,17 @@ impl Entity for List {
             } if value >= AXIS_THRESOLD =>
             {
                 lock_joystick_axis!(which, timestamp, store, || store
-                    .dispatch(NextRom { step: 1 }))
+                    .dispatch(NextRom { timestamp, step: 1 }))
             }
             Event::JoyHatMotion {
                 state: HatState::Up,
                 which,
                 timestamp,
                 ..
-            } => lock_joystick!(which, timestamp, store, || store
-                .dispatch(NextRom { step: -1 })),
+            } => lock_joystick!(which, timestamp, store, || store.dispatch(NextRom {
+                timestamp,
+                step: -1
+            })),
             Event::JoyAxisMotion {
                 axis_idx: 1,
                 value,
@@ -179,8 +177,10 @@ impl Entity for List {
                 ..
             } if value <= -AXIS_THRESOLD =>
             {
-                lock_joystick_axis!(which, timestamp, store, || store
-                    .dispatch(NextRom { step: -1 }))
+                lock_joystick_axis!(which, timestamp, store, || store.dispatch(NextRom {
+                    timestamp,
+                    step: -1
+                }))
             }
             Event::JoyHatMotion {
                 state: HatState::Right,
@@ -189,10 +189,10 @@ impl Entity for List {
                 ..
             } => if rom_selected == -1 {
                 lock_joystick!(which, timestamp, store, || store
-                    .dispatch(NextEmulator { step: 1 }))
+                    .dispatch(NextEmulator { timestamp, step: 1 }))
             } else {
                 lock_joystick!(which, timestamp, store, || store
-                    .dispatch(NextPage { step: 1 }))
+                    .dispatch(NextPage { timestamp, step: 1 }))
             },
             Event::JoyAxisMotion {
                 axis_idx: 0,
@@ -204,10 +204,10 @@ impl Entity for List {
             {
                 if rom_selected == -1 {
                     lock_joystick!(which, timestamp, store, || store
-                        .dispatch(NextEmulator { step: 1 }))
+                        .dispatch(NextEmulator { timestamp, step: 1 }))
                 } else {
                     lock_joystick!(which, timestamp, store, || store
-                        .dispatch(NextPage { step: 1 }))
+                        .dispatch(NextPage { timestamp, step: 1 }))
                 }
             }
             Event::JoyHatMotion {
@@ -216,11 +216,15 @@ impl Entity for List {
                 timestamp,
                 ..
             } => if rom_selected == -1 {
-                lock_joystick!(which, timestamp, store, || store
-                    .dispatch(NextEmulator { step: -1 }))
+                lock_joystick!(which, timestamp, store, || store.dispatch(NextEmulator {
+                    timestamp,
+                    step: -1
+                }))
             } else {
-                lock_joystick!(which, timestamp, store, || store
-                    .dispatch(NextPage { step: -1 }))
+                lock_joystick!(which, timestamp, store, || store.dispatch(NextPage {
+                    timestamp,
+                    step: -1
+                }))
             },
             Event::JoyAxisMotion {
                 axis_idx: 0,
@@ -231,26 +235,27 @@ impl Entity for List {
             } if value <= -AXIS_THRESOLD =>
             {
                 if rom_selected == -1 {
-                    lock_joystick!(which, timestamp, store, || store
-                        .dispatch(NextEmulator { step: -1 }))
+                    lock_joystick!(which, timestamp, store, || store.dispatch(NextEmulator {
+                        timestamp,
+                        step: -1
+                    }))
                 } else {
-                    lock_joystick!(which, timestamp, store, || store
-                        .dispatch(NextPage { step: -1 }))
+                    lock_joystick!(which, timestamp, store, || store.dispatch(NextPage {
+                        timestamp,
+                        step: -1
+                    }))
                 }
             }
             Event::JoyButtonUp {
                 button_idx: 0,
                 which,
+                timestamp,
                 ..
             } => if rom_selected > -1 {
-                store.dispatch(LaunchGame(which))
-            } else {
-                return false;
+                store.dispatch(LaunchGame(timestamp, which))
             },
-            _ => return false,
+            _ => {}
         }
-
-        true
     }
 }
 
@@ -278,13 +283,14 @@ impl Entity for GameLauncher {
         }
     }
 
-    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
+    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) {
         use store::Action::*;
 
         match *event {
             Event::JoyButtonUp {
                 which,
                 button_idx: 0,
+                timestamp,
                 ..
             } => if !store
                 .get_state()
@@ -293,14 +299,10 @@ impl Entity for GameLauncher {
                 .filter(|x| x.is_some())
                 .any(|x| x.as_ref().unwrap().joystick == which)
             {
-                store.dispatch(AddPlayer(which));
-            } else {
-                return false;
+                store.dispatch(AddPlayer(timestamp, which));
             },
-            _ => return false,
+            _ => {}
         }
-
-        true
     }
 }
 
@@ -380,7 +382,7 @@ impl Entity for PlayerMenu {
         }
     }
 
-    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
+    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) {
         use store::Action::*;
 
         let player_joystick = store.get_state().players[self.player_index]
@@ -391,16 +393,18 @@ impl Entity for PlayerMenu {
             Event::JoyButtonUp {
                 which,
                 button_idx: 0,
+                timestamp,
                 ..
             } => if player_joystick == which {
-                store.dispatch(GoPlayerMenu(which));
+                store.dispatch(GoPlayerMenu(timestamp, which));
             },
             Event::JoyHatMotion {
                 which,
                 state: HatState::Right,
+                timestamp,
                 ..
             } => if player_joystick == which {
-                store.dispatch(NextPlayerMenu(which));
+                store.dispatch(NextPlayerMenu(timestamp, which));
             },
             Event::JoyAxisMotion {
                 axis_idx: 0,
@@ -411,14 +415,15 @@ impl Entity for PlayerMenu {
             } if value >= AXIS_THRESOLD =>
             {
                 lock_joystick!(which, timestamp, store, || store
-                    .dispatch(NextPlayerMenu(which)))
+                    .dispatch(NextPlayerMenu(timestamp, which)))
             }
             Event::JoyHatMotion {
                 which,
                 state: HatState::Left,
+                timestamp,
                 ..
             } => if player_joystick == which {
-                store.dispatch(PrevPlayerMenu(which));
+                store.dispatch(PrevPlayerMenu(timestamp, which));
             },
             Event::JoyAxisMotion {
                 axis_idx: 0,
@@ -429,12 +434,10 @@ impl Entity for PlayerMenu {
             } if value <= -AXIS_THRESOLD =>
             {
                 lock_joystick!(which, timestamp, store, || store
-                    .dispatch(PrevPlayerMenu(which)))
+                    .dispatch(PrevPlayerMenu(timestamp, which)))
             }
-            _ => return false,
+            _ => {}
         }
-
-        true
     }
 }
 
@@ -472,7 +475,7 @@ impl Entity for PlayerGrabInput {
             .print(canvas, &format!(" {} >", input_display));
     }
 
-    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) -> bool {
+    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) {
         use self::JoystickEvent::*;
         use store::Action::*;
 
@@ -485,7 +488,7 @@ impl Entity for PlayerGrabInput {
             } if filter_player!(store, self.player_index, which) =>
             {
                 lock_joystick!(which, timestamp, store, || store.dispatch(
-                    BindPlayerJoystickEvent(self.player_index, Button(button_idx))
+                    BindPlayerJoystickEvent(timestamp, self.player_index, Button(button_idx))
                 ))
             }
             Event::JoyHatMotion {
@@ -500,6 +503,7 @@ impl Entity for PlayerGrabInput {
             {
                 lock_joystick!(which, timestamp, store, || store.dispatch(
                     BindPlayerJoystickEvent(
+                        timestamp,
                         self.player_index,
                         Hat(
                             hat_idx,
@@ -525,6 +529,7 @@ impl Entity for PlayerGrabInput {
             {
                 lock_joystick_axis!(which, timestamp, store, || store.dispatch(
                     BindPlayerJoystickEvent(
+                        timestamp,
                         self.player_index,
                         Axis(
                             axis_idx,
@@ -537,10 +542,8 @@ impl Entity for PlayerGrabInput {
                     )
                 ))
             }
-            _ => return false,
+            _ => {}
         }
-
-        true
     }
 }
 
@@ -577,7 +580,7 @@ impl Entity for PlayerGrabEmulatorButtons {
         }
     }
 
-    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
+    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) {
         use self::JoystickEvent::*;
         use store::Action::*;
 
@@ -608,13 +611,11 @@ impl Entity for PlayerGrabEmulatorButtons {
                         app.quit();
                     }
 
-                    store.dispatch(BindEmulatorButton(new_joystick_event));
+                    store.dispatch(BindEmulatorButton(timestamp, new_joystick_event));
                 })
             }
-            _ => return false,
+            _ => {}
         }
-
-        true
     }
 }
 
@@ -630,7 +631,7 @@ impl Entity for Root {
         canvas.clear();
     }
 
-    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) -> bool {
+    fn apply_event(&self, event: &Event, app: &mut App, store: &mut Store) {
         use store::Action::*;
 
         match *event {
@@ -643,20 +644,21 @@ impl Entity for Root {
                 keycode: Some(Keycode::Escape),
                 ..
             } => app.quit(),
-            Event::JoyDeviceAdded { which, .. } => {
+            Event::JoyDeviceAdded {
+                which, timestamp, ..
+            } => {
                 if let Some(info) = app.open_joystick(which) {
-                    store.dispatch(AddJoystick(info));
+                    store.dispatch(AddJoystick(timestamp, info));
                 }
             }
-            Event::JoyDeviceRemoved { which, .. } => {
-                store.dispatch(RemoveJoystick(which));
+            Event::JoyDeviceRemoved {
+                which, timestamp, ..
+            } => {
+                store.dispatch(RemoveJoystick(timestamp, which));
                 app.close_joystick(which);
-                return true;
             }
             _ => {}
         }
-
-        false
     }
 }
 
@@ -683,7 +685,10 @@ impl Meldnafen {
         app.sdl_context.mouse().show_cursor(false);
         let mut store = Store::new();
         Meldnafen::load_state(&mut store);
-        store.dispatch(Action::NextEmulator { step: 0 });
+        store.dispatch(Action::NextEmulator {
+            timestamp: 0,
+            step: 0,
+        });
 
         debug!("setting up canvas...");
         let (w, h) = app.canvas.output_size().unwrap();
@@ -780,15 +785,13 @@ impl Meldnafen {
     }
 
     pub fn apply_event(&mut self, event: Event, node_ids: &Vec<NodeId>) -> bool {
-        let mut result = false;
         for node in node_ids {
             let entity = self.tree.get(&node).unwrap().data();
 
-            result = entity.apply_event(&event, &mut self.app, &mut self.store) || result;
+            entity.apply_event(&event, &mut self.app, &mut self.store);
         }
-        self.store.process();
 
-        return result;
+        return self.store.process();
     }
 
     pub fn collect_entities(&self) -> Vec<NodeId> {

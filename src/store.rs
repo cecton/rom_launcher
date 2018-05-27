@@ -21,6 +21,7 @@ macro_rules! modify_player {
 /// The state of the application
 #[derive(Debug)]
 pub struct State {
+    pub timestamp: u32,
     pub screen: Screen,
     pub page_index: i32,
     pub page_count: i32,
@@ -187,21 +188,21 @@ pub enum GrabControl {
 /// An Enum of all the possible actions in the application
 #[derive(Clone, Debug)]
 pub enum Action {
-    Initialize(SaveState),
+    Initialize(u32, SaveState),
     LoadRoms { roms: Result<Vec<Rom>, String> },
-    NextRom { step: i32 },
-    NextPage { step: i32 },
-    NextEmulator { step: i32 },
-    AddJoystick(JoystickInfo),
-    RemoveJoystick(i32),
-    LaunchGame(i32),
-    AddPlayer(i32),
-    NextPlayerMenu(i32),
-    PrevPlayerMenu(i32),
-    GoPlayerMenu(i32),
-    BindPlayerJoystickEvent(usize, JoystickEvent),
-    UpdateJoystickLastAction(i32, u32),
-    BindEmulatorButton(JoystickEvent),
+    NextRom { timestamp: u32, step: i32 },
+    NextPage { timestamp: u32, step: i32 },
+    NextEmulator { timestamp: u32, step: i32 },
+    AddJoystick(u32, JoystickInfo),
+    RemoveJoystick(u32, i32),
+    LaunchGame(u32, i32),
+    AddPlayer(u32, i32),
+    NextPlayerMenu(u32, i32),
+    PrevPlayerMenu(u32, i32),
+    GoPlayerMenu(u32, i32),
+    BindPlayerJoystickEvent(u32, usize, JoystickEvent),
+    UpdateJoystickLastAction(u32, i32),
+    BindEmulatorButton(u32, JoystickEvent),
 }
 
 /// Reducer
@@ -209,7 +210,8 @@ fn reduce(state: State, action: Action) -> State {
     use self::Action::*;
 
     match action {
-        Initialize(save_state) => State {
+        Initialize(timestamp, save_state) => State {
+            timestamp,
             emulator_selected: save_state.emulator_selected,
             emulators: save_state.emulators,
             console_configs: save_state.console_configs,
@@ -231,7 +233,7 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        NextRom { step } => {
+        NextRom { timestamp, step } => {
             let max = if state.page_index < state.page_count - 1 {
                 PAGE_SIZE
             } else {
@@ -240,33 +242,37 @@ fn reduce(state: State, action: Action) -> State {
             let rom_selected = state.rom_selected + step;
             if state.roms.is_err() || rom_selected < -1 {
                 State {
+                    timestamp,
                     rom_selected: -1,
                     ..state
                 }
             } else if rom_selected >= max {
                 State {
+                    timestamp,
                     rom_selected: max - 1,
                     ..state
                 }
             } else {
                 State {
+                    timestamp,
                     rom_selected,
                     ..state
                 }
             }
         }
-        NextPage { step } => {
+        NextPage { timestamp, step } => {
             let page_index = state.page_index + step;
             if state.roms.is_err() || page_index < 0 || page_index >= state.page_count {
                 state
             } else {
                 State {
+                    timestamp,
                     page_index,
                     ..state
                 }
             }
         }
-        NextEmulator { step } => {
+        NextEmulator { timestamp, step } => {
             let max = state.emulators.len() as i32 - 1;
             let mut emulator_selected = state.emulator_selected + step;
             if emulator_selected < 0 {
@@ -276,17 +282,22 @@ fn reduce(state: State, action: Action) -> State {
             }
 
             State {
+                timestamp,
                 emulator_selected,
                 ..state
             }
         }
-        AddJoystick(info) => {
+        AddJoystick(timestamp, info) => {
             let mut joysticks = state.joysticks;
             joysticks.insert(info.instance_id, info);
 
-            State { joysticks, ..state }
+            State {
+                timestamp,
+                joysticks,
+                ..state
+            }
         }
-        RemoveJoystick(joystick_id) => {
+        RemoveJoystick(timestamp, joystick_id) => {
             let mut joysticks = state.joysticks;
             joysticks.remove(&joystick_id);
             let mut players = state.players;
@@ -303,22 +314,24 @@ fn reduce(state: State, action: Action) -> State {
             }
 
             State {
+                timestamp,
                 joysticks,
                 players,
                 screen,
                 ..state
             }
         }
-        LaunchGame(..) => {
+        LaunchGame(timestamp, ..) => {
             let mut players = [None, None, None, None, None, None, None, None, None, None];
 
             State {
+                timestamp,
                 screen: Screen::GameLauncher,
                 players,
                 ..state
             }
         }
-        AddPlayer(joystick) => match state.players.iter().position(|x| x.is_none()) {
+        AddPlayer(timestamp, joystick) => match state.players.iter().position(|x| x.is_none()) {
             None => state,
             Some(free_slot) => {
                 if state.players[0]
@@ -343,10 +356,14 @@ fn reduce(state: State, action: Action) -> State {
                     grab_emulator_buttons: None,
                 });
 
-                State { players, ..state }
+                State {
+                    timestamp,
+                    players,
+                    ..state
+                }
             }
         },
-        NextPlayerMenu(joystick_id) => {
+        NextPlayerMenu(timestamp, joystick_id) => {
             use self::PlayerMenu::*;
 
             let i = state.get_player_index(joystick_id);
@@ -366,9 +383,13 @@ fn reduce(state: State, action: Action) -> State {
                 }
             }
 
-            State { players, ..state }
+            State {
+                timestamp,
+                players,
+                ..state
+            }
         }
-        PrevPlayerMenu(joystick_id) => {
+        PrevPlayerMenu(timestamp, joystick_id) => {
             use self::PlayerMenu::*;
 
             let i = state.get_player_index(joystick_id);
@@ -388,9 +409,13 @@ fn reduce(state: State, action: Action) -> State {
                 }
             }
 
-            State { players, ..state }
+            State {
+                timestamp,
+                players,
+                ..state
+            }
         }
-        GoPlayerMenu(joystick_id) => {
+        GoPlayerMenu(timestamp, joystick_id) => {
             use self::GrabControl::*;
             use self::PlayerMenu::*;
 
@@ -422,12 +447,13 @@ fn reduce(state: State, action: Action) -> State {
             }
 
             State {
+                timestamp,
                 screen,
                 players,
                 ..state
             }
         }
-        BindPlayerJoystickEvent(i, event) => {
+        BindPlayerJoystickEvent(timestamp, i, event) => {
             use self::GrabControl::*;
 
             let controls_len = state.get_controls().len();
@@ -466,22 +492,24 @@ fn reduce(state: State, action: Action) -> State {
             }
 
             State {
+                timestamp,
                 players,
                 console_configs,
                 game_configs,
                 ..state
             }
         }
-        UpdateJoystickLastAction(joystick_id, timestamp) => {
+        UpdateJoystickLastAction(timestamp, joystick_id) => {
             let mut last_joystick_action = state.last_joystick_action;
             last_joystick_action.insert(joystick_id, timestamp);
 
             State {
+                timestamp,
                 last_joystick_action,
                 ..state
             }
         }
-        BindEmulatorButton(event) => {
+        BindEmulatorButton(timestamp, event) => {
             let mut players = state.players;
 
             if let Some(player) = players[0].as_mut() {
@@ -495,7 +523,11 @@ fn reduce(state: State, action: Action) -> State {
                 }
             }
 
-            State { players, ..state }
+            State {
+                timestamp,
+                players,
+                ..state
+            }
         }
     }
 }
@@ -548,6 +580,7 @@ impl Store {
         ];
 
         State {
+            timestamp: 0,
             screen: Screen::List,
             emulators,
             page_index: 0,
@@ -574,9 +607,10 @@ impl Store {
         self.queue.push(StoreAction::Thunk(f));
     }
 
-    pub fn process(&mut self) {
+    pub fn process(&mut self) -> bool {
         use self::StoreAction::*;
         let todo: Vec<_> = self.queue.drain(..).collect();
+        let timestamp = self.state.as_ref().unwrap().timestamp;
 
         for action in todo {
             match action {
@@ -601,6 +635,8 @@ impl Store {
         if !self.queue.is_empty() {
             self.process();
         }
+
+        timestamp != self.state.as_ref().unwrap().timestamp
     }
 
     pub fn get_state(&self) -> &State {
@@ -632,7 +668,7 @@ impl Store {
         match serde_json::from_reader(reader) {
             Ok(save_state) => {
                 debug!("state loaded: {:?}", save_state);
-                self.dispatch(Action::Initialize(save_state));
+                self.dispatch(Action::Initialize(0, save_state));
                 self.process();
             }
             Err(err) => panic!("could not load state: {}", err),
@@ -645,22 +681,22 @@ fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
     use self::Action::*;
 
     match &action {
-        &Initialize { .. } | &NextEmulator { .. } => {
+        &Initialize(timestamp, ..) | &NextEmulator { timestamp, .. } => {
             store.dispatch_thunk(Box::new(|store: &mut Store| {
                 let roms = get_roms(&store.get_state().get_emulator().path);
                 store.dispatch(LoadRoms { roms })
             }));
-            store.dispatch(NextRom { step: 0 });
+            store.dispatch(NextRom { timestamp, step: 0 });
 
             Some(action)
         }
-        &NextPage { .. } => {
-            store.dispatch(NextRom { step: 0 });
+        &NextPage { timestamp, .. } => {
+            store.dispatch(NextRom { timestamp, step: 0 });
 
             Some(action)
         }
-        &LaunchGame(joystick) => {
-            store.dispatch(AddPlayer(joystick));
+        &LaunchGame(timestamp, joystick) => {
+            store.dispatch(AddPlayer(timestamp, joystick));
 
             Some(action)
         }
