@@ -108,6 +108,9 @@ pub struct Emulator {
     pub name: String,
     pub path: String,
     pub controls: Vec<(String, String)>,
+    pub command: Vec<String>,
+    pub extensions: Vec<String>,
+    pub exclude: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -176,6 +179,10 @@ impl JoystickConfig {
         }
 
         res
+    }
+
+    pub fn get(&self, guid: &JoystickGuid, key: &str) -> Option<&Vec<JoystickEvent>> {
+        self.0.get(guid).and_then(|x| x.get(key))
     }
 }
 
@@ -602,12 +609,18 @@ impl Store {
                     ("select".to_string(), "Select".to_string()),
                     ("start".to_string(), "Run".to_string()),
                 ],
+                command: vec!["retroarch".to_string()],
+                extensions: vec!["pce".to_string()],
+                exclude: vec!["syscard3.pce".to_string()],
             },
             Emulator {
                 id: "md".to_string(),
                 name: "Mega Drive".to_string(),
                 path: "~/md_roms".to_string(),
                 controls: vec![],
+                command: vec!["retroarch".to_string()],
+                extensions: vec!["bin".to_string(), "smd".to_string()],
+                exclude: vec![],
             },
         ];
 
@@ -685,7 +698,7 @@ impl Store {
             };
             debug!("state dumped to: {:?}", save_state);
 
-            Ok(serde_json::to_string(&save_state)
+            Ok(serde_json::to_string_pretty(&save_state)
                 .map_err(|x| format!("{}", x))?
                 .into_bytes())
         } else {
@@ -715,7 +728,10 @@ fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
     match &action {
         &Initialize(timestamp, ..) | &NextEmulator { timestamp, .. } => {
             store.dispatch_thunk(Box::new(|store: &mut Store| {
-                let roms = get_roms(&store.get_state().get_emulator().path);
+                let roms = {
+                    let emulator = store.get_state().get_emulator();
+                    get_roms(&emulator.path, &emulator.extensions, &emulator.exclude)
+                };
                 store.dispatch(LoadRoms { roms })
             }));
             store.dispatch(NextRom { timestamp, step: 0 });
@@ -736,16 +752,36 @@ fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
     }
 }
 
-fn get_roms(path: &str) -> Result<Vec<Rom>, String> {
+fn get_roms(
+    path: &str,
+    extensions: &Vec<String>,
+    exclude: &Vec<String>,
+) -> Result<Vec<Rom>, String> {
     let resolved_path = path.replace("~", std::env::home_dir().unwrap().to_str().unwrap());
     let mut roms = std::fs::read_dir(resolved_path)
         .or_else(|x| Err(format!("{}", x)))?
         .map(|x| x.unwrap().path())
         .filter(|x| x.is_file())
+        .filter(|x| {
+            x.extension()
+                .map(|x| x.to_str().unwrap())
+                .map(|x| extensions.iter().any(|y| y == x)) == Some(true)
+        })
+        .filter(|x| {
+            x.file_name()
+                .map(|x| x.to_str().unwrap())
+                .map(|x| exclude.iter().any(|y| y == x)) == Some(false)
+        })
         .map(|x| Rom {
             path: x.to_str().unwrap().to_string(),
-            name: x.file_stem().unwrap().to_os_string().into_string().unwrap(),
-            file_name: x.file_name().unwrap().to_os_string().into_string().unwrap(),
+            name: x.file_stem()
+                .map(|x| x.to_str().unwrap())
+                .unwrap()
+                .to_string(),
+            file_name: x.file_name()
+                .map(|x| x.to_str().unwrap())
+                .unwrap()
+                .to_string(),
         })
         .collect::<Vec<_>>();
     roms.sort_by(|a, b| a.name.cmp(&b.name));

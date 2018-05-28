@@ -7,7 +7,7 @@ use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 use std::cmp;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -75,6 +75,29 @@ macro_rules! filter_player {
     };
 }
 
+macro_rules! translate_to_retroarch_button {
+    ($event:expr) => {
+        match *$event {
+            Button(x) => format!("btn = {}", x),
+            Hat(x, ref state) => format!(
+                "btn = h{}{}",
+                x,
+                match *state {
+                    HatState::Up => "up",
+                    HatState::Down => "down",
+                    HatState::Left => "left",
+                    HatState::Right => "right",
+                }
+            ),
+            Axis(x, ref state) => match *state {
+                AxisState::Positive => format!("axis = +{}", x),
+                AxisState::Negative => format!("axis = -{}", x),
+            },
+            Unassigned => panic!(),
+        }
+    };
+}
+
 pub trait Entity {
     fn is_active(&self, _state: &State) -> bool;
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources);
@@ -114,22 +137,32 @@ impl Entity for List {
                     if i as i32 == state.rom_selected {
                         resources.font.texture.set_color_mod(255, 255, 0);
                     }
-                    resources.font.println(canvas, &rom.name);
+                    if rom.name.len() > 39 {
+                        resources
+                            .font
+                            .println(canvas, &format!("{}...", &rom.name[..39]));
+                    } else {
+                        resources.font.println(canvas, &rom.name);
+                    }
                     if i as i32 == state.rom_selected {
                         resources.font.texture.set_color_mod(255, 255, 255);
                     }
                 }
-                for i in 0..(PAGE_SIZE - (roms.len() as i32 - state.page_index * PAGE_SIZE)) {
+                for _ in 0..(PAGE_SIZE - (roms.len() as i32 - state.page_index * PAGE_SIZE)) {
                     resources.font.println(canvas, "");
                 }
+
                 resources.font.println(canvas, "");
                 resources.font.println(
                     canvas,
                     &format!(
-                        "Page {} of {} ({} roms)",
-                        state.page_index + 1,
-                        state.page_count,
-                        roms.len()
+                        "{: >42}",
+                        &format!(
+                            "Page {} of {} ({} roms)",
+                            state.page_index + 1,
+                            state.page_count,
+                            roms.len()
+                        )
                     ),
                 );
             }
@@ -355,9 +388,8 @@ impl Entity for PlayerMenu {
                     || state.player_needs_setup_controls(self.player_index)
                 {
                     resources.font.texture.set_color_mod(0, 0, 0);
-                } else {
-                    set_highlight!(canvas, resources.font, player.menu == Ready);
                 }
+                set_highlight!(canvas, resources.font, player.menu == Ready);
                 if self.player_index == 0 {
                     resources.font.print(canvas, "Start          ");
                 } else {
@@ -375,6 +407,7 @@ impl Entity for PlayerMenu {
                 resources.font.print(canvas, "Console");
                 set_highlight!(canvas, resources.font, player.menu == GameControls);
                 resources.font.print(canvas, "Game");
+                // TODO: black if already empty
                 set_highlight!(canvas, resources.font, player.menu == ClearConsoleControls);
                 resources.font.print(canvas, "Clear   ");
                 set_highlight!(canvas, resources.font, player.menu == ControlsExit);
@@ -807,7 +840,7 @@ impl ROMLauncher {
         return OnlyActiveTraversal::new(&self.tree, root_id, state).collect();
     }
 
-    pub fn run_loop(&mut self) -> Option<String> {
+    pub fn run_loop(&mut self) -> Option<(Vec<String>, String, String)> {
         debug!("looping over events...");
         let mut rerender = true;
         let mut event_pump = self.app.sdl_context.event_pump().unwrap();
@@ -826,7 +859,81 @@ impl ROMLauncher {
             }
         }
 
-        None
+        self.prepare_config()
+    }
+
+    pub fn prepare_config(&self) -> Option<(Vec<String>, String, String)> {
+        use self::JoystickEvent::*;
+        use store::{AxisState, HatState};
+        let state = self.store.get_state();
+
+        if state.players.iter().any(|x| x.is_some()) {
+            let mut config = "".to_string();
+            let emulator = state.get_emulator();
+            let emulator_id = state.get_emulator().id.clone();
+            let rom = state.get_rom().clone();
+
+            let mut joystick_order = HashMap::new();
+            let mut joystick_ids: Vec<_> = state.joysticks.keys().collect();
+            joystick_ids.sort();
+            for (i, joystick) in joystick_ids.into_iter().enumerate() {
+                joystick_order.insert(joystick, i);
+            }
+
+            for (i, player) in state
+                .players
+                .iter()
+                .filter(|x| x.is_some())
+                .map(|x| x.as_ref().unwrap())
+                .enumerate()
+            {
+                config.push_str(&format!(
+                    "input_player{}_joypad_index = {}\n",
+                    i + 1,
+                    joystick_order.get(&player.joystick).unwrap()
+                ));
+
+                let guid = state.joysticks[&player.joystick].guid;
+                for (event, control) in state
+                    .game_configs
+                    .get(&guid, &rom.file_name)
+                    .or_else(|| state.console_configs.get(&guid, &emulator_id))
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .zip(emulator.controls.iter().map(|&(ref x, _)| x))
+                {
+                    config.push_str(&match *event {
+                        Unassigned => format!("// input_player{}_{} unassigned\n", i + 1, control),
+                        _ => format!(
+                            "input_player{}_{}_{}\n",
+                            i + 1,
+                            control,
+                            translate_to_retroarch_button!(event)
+                        ),
+                    });
+                }
+
+                if let Some((Some(ref hotkey), Some(ref menu))) = player.grab_emulator_buttons {
+                    config.push_str(&format!(
+                        "input_enable_hotkey_{}\n",
+                        translate_to_retroarch_button!(hotkey)
+                    ));
+                    config.push_str(&format!(
+                        "input_menu_toggle_{}\n",
+                        translate_to_retroarch_button!(menu)
+                    ));
+                }
+
+                config.push_str("\n");
+            }
+
+            config.push_str("config_save_on_exit = false\n");
+
+            Some((emulator.command.clone(), config, rom.path))
+        } else {
+            None
+        }
     }
 }
 
