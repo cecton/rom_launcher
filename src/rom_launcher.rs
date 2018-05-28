@@ -186,12 +186,12 @@ impl Entity for List {
             } => lock_joystick!(which, timestamp, store, || store
                 .dispatch(NextRom { timestamp, step: 1 })),
             Event::JoyAxisMotion {
-                axis_idx: 1,
+                axis_idx,
                 value,
                 which,
                 timestamp,
                 ..
-            } if value >= AXIS_THRESOLD =>
+            } if axis_idx % 2 == 1 && value >= AXIS_THRESOLD =>
             {
                 lock_joystick_axis!(which, timestamp, store, || store
                     .dispatch(NextRom { timestamp, step: 1 }))
@@ -206,12 +206,12 @@ impl Entity for List {
                 step: -1
             })),
             Event::JoyAxisMotion {
-                axis_idx: 1,
+                axis_idx,
                 value,
                 which,
                 timestamp,
                 ..
-            } if value <= -AXIS_THRESOLD =>
+            } if axis_idx % 2 == 1 && value <= -AXIS_THRESOLD =>
             {
                 lock_joystick_axis!(which, timestamp, store, || store.dispatch(NextRom {
                     timestamp,
@@ -231,12 +231,12 @@ impl Entity for List {
                     .dispatch(NextPage { timestamp, step: 1 }))
             },
             Event::JoyAxisMotion {
-                axis_idx: 0,
+                axis_idx,
                 value,
                 which,
                 timestamp,
                 ..
-            } if value >= AXIS_THRESOLD =>
+            } if axis_idx % 2 == 0 && value >= AXIS_THRESOLD =>
             {
                 if rom_selected == -1 {
                     lock_joystick!(which, timestamp, store, || store
@@ -263,12 +263,12 @@ impl Entity for List {
                 }))
             },
             Event::JoyAxisMotion {
-                axis_idx: 0,
+                axis_idx,
                 value,
                 which,
                 timestamp,
                 ..
-            } if value <= -AXIS_THRESOLD =>
+            } if axis_idx % 2 == 0 && value <= -AXIS_THRESOLD =>
             {
                 if rom_selected == -1 {
                     lock_joystick!(which, timestamp, store, || store.dispatch(NextEmulator {
@@ -283,13 +283,27 @@ impl Entity for List {
                 }
             }
             Event::JoyButtonUp {
-                button_idx: 0,
+                button_idx,
                 which,
                 timestamp,
                 ..
-            } => if rom_selected > -1 {
-                store.dispatch(LaunchGame(timestamp, which))
-            },
+            } => {
+                let split_index = {
+                    let state = store.get_state();
+                    let split_value =
+                        state.joysticks[&which].buttons / state.joysticks[&which].split;
+
+                    if button_idx as u32 % split_value == 0 {
+                        Some(button_idx as u32 / split_value)
+                    } else {
+                        None
+                    }
+                };
+
+                if split_index.is_some() && rom_selected > -1 {
+                    store.dispatch(LaunchGame(timestamp, which, split_index.unwrap()))
+                }
+            }
             _ => {}
         }
     }
@@ -325,18 +339,35 @@ impl Entity for GameLauncher {
         match *event {
             Event::JoyButtonUp {
                 which,
-                button_idx: 0,
+                button_idx,
                 timestamp,
                 ..
-            } => if !store
-                .get_state()
-                .players
-                .iter()
-                .filter(|x| x.is_some())
-                .any(|x| x.as_ref().unwrap().joystick == which)
-            {
-                store.dispatch(AddPlayer(timestamp, which));
-            },
+            } => {
+                let split_index = {
+                    let state = store.get_state();
+                    let split_value =
+                        state.joysticks[&which].buttons / state.joysticks[&which].split;
+
+                    if button_idx as u32 % split_value == 0 {
+                        Some(button_idx as u32 / split_value)
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(split_index) = split_index {
+                    if !store
+                        .get_state()
+                        .players
+                        .iter()
+                        .filter(|x| x.is_some())
+                        .map(|x| x.as_ref().unwrap())
+                        .any(|x| x.joystick == which && x.joystick_split == split_index)
+                    {
+                        store.dispatch(AddPlayer(timestamp, which, split_index));
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -395,6 +426,7 @@ impl Entity for PlayerMenu {
                 } else {
                     resources.font.print(canvas, "Ready          ");
                 }
+                resources.font.texture.set_color_mod(255, 255, 255);
                 set_highlight!(canvas, resources.font, player.menu == Leave);
                 if self.player_index == 0 {
                     resources.font.print(canvas, "Exit");
@@ -423,56 +455,96 @@ impl Entity for PlayerMenu {
     fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) {
         use store::Action::*;
 
-        let player_joystick = store.get_state().players[self.player_index]
+        let (player_joystick, player_split) = store.get_state().players[self.player_index]
             .as_ref()
-            .unwrap()
-            .joystick;
+            .map(|x| (x.joystick, x.joystick_split))
+            .unwrap();
         match *event {
             Event::JoyButtonUp {
                 which,
-                button_idx: 0,
+                button_idx,
                 timestamp,
                 ..
             } => if player_joystick == which {
-                store.dispatch(GoPlayerMenu(timestamp, which));
+                let split_index = {
+                    let state = store.get_state();
+                    let split_value =
+                        state.joysticks[&which].buttons / state.joysticks[&which].split;
+
+                    if button_idx as u32 % split_value == 0 {
+                        Some(button_idx as u32 / split_value)
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(split_index) = split_index {
+                    if player_split == split_index {
+                        store.dispatch(GoPlayerMenu(timestamp, which, split_index));
+                    }
+                }
             },
             Event::JoyHatMotion {
+                hat_idx,
                 which,
                 state: HatState::Right,
                 timestamp,
                 ..
             } => if player_joystick == which {
-                store.dispatch(NextPlayerMenu(timestamp, which));
+                let split_index = hat_idx as u32;
+
+                if player_split == split_index {
+                    store.dispatch(NextPlayerMenu(timestamp, which, split_index));
+                }
             },
             Event::JoyAxisMotion {
-                axis_idx: 0,
+                axis_idx,
                 value,
                 which,
                 timestamp,
                 ..
-            } if value >= AXIS_THRESOLD =>
+            } if axis_idx % 2 == 0 && value >= AXIS_THRESOLD =>
             {
-                lock_joystick!(which, timestamp, store, || store
-                    .dispatch(NextPlayerMenu(timestamp, which)))
+                let split_index = axis_idx as u32 / 2;
+
+                if player_split == split_index {
+                    lock_joystick!(which, timestamp, store, || store.dispatch(NextPlayerMenu(
+                        timestamp,
+                        which,
+                        split_index
+                    )))
+                }
             }
             Event::JoyHatMotion {
+                hat_idx,
                 which,
                 state: HatState::Left,
                 timestamp,
                 ..
             } => if player_joystick == which {
-                store.dispatch(PrevPlayerMenu(timestamp, which));
+                let split_index = hat_idx as u32;
+
+                if player_split == split_index {
+                    store.dispatch(PrevPlayerMenu(timestamp, which, split_index));
+                }
             },
             Event::JoyAxisMotion {
-                axis_idx: 0,
+                axis_idx,
                 value,
                 which,
                 timestamp,
                 ..
-            } if value <= -AXIS_THRESOLD =>
+            } if axis_idx % 2 == 0 && value <= -AXIS_THRESOLD =>
             {
-                lock_joystick!(which, timestamp, store, || store
-                    .dispatch(PrevPlayerMenu(timestamp, which)))
+                let split_index = axis_idx as u32 / 2;
+
+                if player_split == split_index {
+                    lock_joystick!(which, timestamp, store, || store.dispatch(PrevPlayerMenu(
+                        timestamp,
+                        which,
+                        split_index
+                    )))
+                }
             }
             _ => {}
         }
@@ -681,7 +753,10 @@ impl Entity for Root {
             | Event::KeyUp {
                 keycode: Some(Keycode::Escape),
                 ..
-            } => app.quit(),
+            } => {
+                store.dispatch(Quit);
+                app.quit();
+            }
             Event::JoyDeviceAdded {
                 which, timestamp, ..
             } => {
@@ -867,7 +942,7 @@ impl ROMLauncher {
         use store::{AxisState, HatState};
         let state = self.store.get_state();
 
-        if state.players.iter().any(|x| x.is_some()) {
+        if state.screen == store::Screen::GameLauncher {
             let mut config = "".to_string();
             let emulator = state.get_emulator();
             let emulator_id = state.get_emulator().id.clone();
@@ -896,8 +971,12 @@ impl ROMLauncher {
                 let guid = state.joysticks[&player.joystick].guid;
                 for (event, control) in state
                     .game_configs
-                    .get(&guid, &rom.file_name)
-                    .or_else(|| state.console_configs.get(&guid, &emulator_id))
+                    .get(&guid, &player.joystick_split, &rom.file_name)
+                    .or_else(|| {
+                        state
+                            .console_configs
+                            .get(&guid, &player.joystick_split, &emulator_id)
+                    })
                     .as_ref()
                     .unwrap()
                     .iter()

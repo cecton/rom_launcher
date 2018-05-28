@@ -7,10 +7,10 @@ use joystick::*;
 pub const PAGE_SIZE: i32 = 15;
 
 macro_rules! modify_player {
-    ($players:expr, $joystick:expr, $closure:expr) => {
+    ($players:expr, $joystick:expr, $split:expr, $closure:expr) => {
         for (i, maybe_player) in $players.iter_mut().enumerate() {
             if let Some(player) = maybe_player.as_mut() {
-                if player.joystick == $joystick {
+                if player.joystick == $joystick && player.joystick_split == $split {
                     $closure(i, player)
                 }
             }
@@ -46,10 +46,14 @@ impl State {
         &self.get_emulator().controls
     }
 
-    pub fn get_player_index(&self, joystick_id: i32) -> usize {
+    pub fn get_player_index(&self, joystick_id: i32, split: u32) -> usize {
         self.players
             .iter()
-            .position(|x| x.as_ref().map(|x| x.joystick) == Some(joystick_id))
+            .position(|x| {
+                x.as_ref()
+                    .map(|x| x.joystick == joystick_id && x.joystick_split == split)
+                    == Some(true)
+            })
             .unwrap()
     }
 
@@ -64,20 +68,19 @@ impl State {
     pub fn player_needs_setup_controls(&self, player_index: usize) -> bool {
         match self.players[player_index].as_ref() {
             Some(player) => {
-                let joystick_id = &player.joystick;
-                self.joystick_needs_setup_controls(*joystick_id)
+                self.joystick_needs_setup_controls(player.joystick, player.joystick_split)
             }
             None => false,
         }
     }
 
-    pub fn joystick_needs_setup_controls(&self, joystick_id: i32) -> bool {
+    pub fn joystick_needs_setup_controls(&self, joystick_id: i32, split: u32) -> bool {
         let guid = &self.joysticks[&joystick_id].guid;
         let emulator_id = &self.get_emulator().id;
         let rom = &self.get_rom().file_name;
 
-        !self.console_configs.contains_key(guid, emulator_id)
-            && !self.game_configs.contains_key(guid, rom)
+        !self.console_configs.contains_key(guid, &split, emulator_id)
+            && !self.game_configs.contains_key(guid, &split, rom)
     }
 
     pub fn any_player_needs_setup_controls(&self) -> bool {
@@ -143,7 +146,7 @@ pub enum JoystickEvent {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct JoystickConfig(HashMap<JoystickGuid, HashMap<String, Vec<JoystickEvent>>>);
+pub struct JoystickConfig(HashMap<JoystickGuid, HashMap<u32, HashMap<String, Vec<JoystickEvent>>>>);
 
 impl JoystickConfig {
     fn new() -> JoystickConfig {
@@ -153,6 +156,7 @@ impl JoystickConfig {
     pub fn insert(
         &mut self,
         guid: JoystickGuid,
+        split: u32,
         key: String,
         mapping: Vec<JoystickEvent>,
     ) -> Option<Vec<JoystickEvent>> {
@@ -160,35 +164,67 @@ impl JoystickConfig {
             self.0.insert(guid, HashMap::new());
         }
 
-        self.0.get_mut(&guid).unwrap().insert(key, mapping)
+        if !self.0[&guid].contains_key(&split) {
+            self.0.get_mut(&guid).unwrap().insert(split, HashMap::new());
+        }
+
+        self.0
+            .get_mut(&guid)
+            .unwrap()
+            .get_mut(&split)
+            .unwrap()
+            .insert(key, mapping)
     }
 
-    pub fn contains_key(&self, guid: &JoystickGuid, key: &str) -> bool {
-        self.0.contains_key(guid) && self.0.get(guid).unwrap().contains_key(key)
+    pub fn contains_key(&self, guid: &JoystickGuid, split: &u32, key: &str) -> bool {
+        self.0.contains_key(guid) && self.0[guid].contains_key(split)
+            && self.0[guid][split].contains_key(key)
     }
 
-    pub fn remove(&mut self, guid: JoystickGuid, key: String) -> Option<Vec<JoystickEvent>> {
+    pub fn remove(
+        &mut self,
+        guid: JoystickGuid,
+        split: u32,
+        key: String,
+    ) -> Option<Vec<JoystickEvent>> {
         if !self.0.contains_key(&guid) {
             return None;
         }
 
-        let res = self.0.get_mut(&guid).unwrap().remove(&key);
+        if !self.0[&guid].contains_key(&split) {
+            return None;
+        }
 
-        if self.0.get(&guid).unwrap().len() == 0 {
+        let res = self.0
+            .get_mut(&guid)
+            .unwrap()
+            .get_mut(&split)
+            .unwrap()
+            .remove(&key);
+
+        if self.0[&guid][&split].len() == 0 {
+            self.0.get_mut(&guid).unwrap().remove(&split);
+        }
+
+        if self.0[&guid].len() == 0 {
             self.0.remove(&guid);
         }
 
         res
     }
 
-    pub fn get(&self, guid: &JoystickGuid, key: &str) -> Option<&Vec<JoystickEvent>> {
-        self.0.get(guid).and_then(|x| x.get(key))
+    pub fn get(&self, guid: &JoystickGuid, split: &u32, key: &str) -> Option<&Vec<JoystickEvent>> {
+        self.0
+            .get(guid)
+            .and_then(|x| x.get(split))
+            .and_then(|x| x.get(key))
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct Player {
     pub joystick: i32,
+    pub joystick_split: u32,
     pub menu: PlayerMenu,
     pub grab_input: Option<(GrabControl, Vec<JoystickEvent>)>,
     pub grab_emulator_buttons: Option<(Option<JoystickEvent>, Option<JoystickEvent>)>,
@@ -222,14 +258,15 @@ pub enum Action {
     NextEmulator { timestamp: u32, step: i32 },
     AddJoystick(u32, JoystickInfo),
     RemoveJoystick(u32, i32),
-    LaunchGame(u32, i32),
-    AddPlayer(u32, i32),
-    NextPlayerMenu(u32, i32),
-    PrevPlayerMenu(u32, i32),
-    GoPlayerMenu(u32, i32),
-    BindPlayerJoystickEvent(u32, usize, JoystickEvent),
-    UpdateJoystickLastAction(u32, i32),
-    BindEmulatorButton(u32, JoystickEvent),
+    LaunchGame(u32, i32, u32),
+    AddPlayer(u32, i32, u32),
+    NextPlayerMenu(u32, i32, u32),
+    PrevPlayerMenu(u32, i32, u32),
+    GoPlayerMenu(u32, i32, u32),
+    BindPlayerJoystickEvent(u32, usize, JoystickEvent), // TODO: take joystick split into account
+    UpdateJoystickLastAction(u32, i32), // TODO: take joystick split into account
+    BindEmulatorButton(u32, JoystickEvent), // TODO: take joystick split into account
+    Quit,
 }
 
 /// Reducer
@@ -328,14 +365,14 @@ fn reduce(state: State, action: Action) -> State {
             let mut joysticks = state.joysticks;
             joysticks.remove(&joystick_id);
             let mut players = state.players;
-            let mut remove_player = None;
             let mut screen = state.screen;
-            modify_player!(players, joystick_id, |i: usize, _player: &mut Player| {
-                remove_player = Some(i)
-            });
-            if let Some(i) = remove_player {
-                players[i] = None;
+
+            for slot in players.iter_mut() {
+                if slot.as_ref().map(|x| x.joystick) == Some(joystick_id) {
+                    *slot = None;
+                }
             }
+
             if players.iter().all(|x| x.is_none()) {
                 screen = Screen::List;
             }
@@ -358,42 +395,46 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        AddPlayer(timestamp, joystick) => match state.players.iter().position(|x| x.is_none()) {
-            None => state,
-            Some(free_slot) => {
-                if state.players[0]
-                    .as_ref()
-                    .and_then(|x| x.grab_emulator_buttons.as_ref())
-                    .is_some()
-                {
-                    return state;
-                }
+        AddPlayer(timestamp, joystick, joystick_split) => {
+            match state.players.iter().position(|x| x.is_none()) {
+                None => state,
+                Some(free_slot) => {
+                    if state.players[0]
+                        .as_ref()
+                        .and_then(|x| x.grab_emulator_buttons.as_ref())
+                        .is_some()
+                    {
+                        return state;
+                    }
 
-                let player_needs_setup_controls = state.joystick_needs_setup_controls(joystick);
-                let mut players = state.players;
+                    let player_needs_setup_controls =
+                        state.joystick_needs_setup_controls(joystick, joystick_split);
+                    let mut players = state.players;
 
-                players[free_slot] = Some(Player {
-                    joystick,
-                    menu: if player_needs_setup_controls {
-                        PlayerMenu::Controls
-                    } else {
-                        PlayerMenu::Ready
-                    },
-                    grab_input: None,
-                    grab_emulator_buttons: None,
-                });
+                    players[free_slot] = Some(Player {
+                        joystick,
+                        joystick_split,
+                        menu: if player_needs_setup_controls {
+                            PlayerMenu::Controls
+                        } else {
+                            PlayerMenu::Ready
+                        },
+                        grab_input: None,
+                        grab_emulator_buttons: None,
+                    });
 
-                State {
-                    timestamp,
-                    players,
-                    ..state
+                    State {
+                        timestamp,
+                        players,
+                        ..state
+                    }
                 }
             }
-        },
-        NextPlayerMenu(timestamp, joystick_id) => {
+        }
+        NextPlayerMenu(timestamp, joystick_id, split) => {
             use self::PlayerMenu::*;
 
-            let i = state.get_player_index(joystick_id);
+            let i = state.get_player_index(joystick_id, split);
             let player_needs_setup_controls = state.player_needs_setup_controls(i);
             let mut players = state.players;
             if let Some(player) = players[i].as_mut() {
@@ -417,10 +458,10 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        PrevPlayerMenu(timestamp, joystick_id) => {
+        PrevPlayerMenu(timestamp, joystick_id, split) => {
             use self::PlayerMenu::*;
 
-            let i = state.get_player_index(joystick_id);
+            let i = state.get_player_index(joystick_id, split);
             let player_needs_setup_controls = state.player_needs_setup_controls(i);
             let mut players = state.players;
             if let Some(player) = players[i].as_mut() {
@@ -444,7 +485,7 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        GoPlayerMenu(timestamp, joystick_id) => {
+        GoPlayerMenu(timestamp, joystick_id, joystick_split) => {
             use self::GrabControl::*;
             use self::PlayerMenu::*;
 
@@ -457,6 +498,7 @@ fn reduce(state: State, action: Action) -> State {
             modify_player!(
                 players,
                 joystick_id,
+                joystick_split,
                 |i: usize, player: &mut Player| match player.menu {
                     Ready => if i == 0 {
                         player.grab_emulator_buttons = Some((None, None));
@@ -481,7 +523,7 @@ fn reduce(state: State, action: Action) -> State {
 
             if let Some(joystick) = clear_game_config {
                 let guid = state.joysticks[&joystick].guid;
-                game_configs.remove(guid, rom);
+                game_configs.remove(guid, joystick_split, rom);
             }
 
             State {
@@ -520,10 +562,15 @@ fn reduce(state: State, action: Action) -> State {
 
                     match save_mapping {
                         Some((Console, mapping)) => {
-                            console_configs.insert(guid, emulator_id, mapping);
+                            console_configs.insert(
+                                guid,
+                                player.joystick_split,
+                                emulator_id,
+                                mapping,
+                            );
                         }
                         Some((Game, mapping)) => {
-                            game_configs.insert(guid, rom, mapping);
+                            game_configs.insert(guid, player.joystick_split, rom, mapping);
                         }
                         _ => {}
                     }
@@ -568,6 +615,10 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
+        Quit => State {
+            screen: Screen::List,
+            ..state
+        },
     }
 }
 
@@ -743,8 +794,8 @@ fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
 
             Some(action)
         }
-        &LaunchGame(timestamp, joystick) => {
-            store.dispatch(AddPlayer(timestamp, joystick));
+        &LaunchGame(timestamp, joystick, joystick_split) => {
+            store.dispatch(AddPlayer(timestamp, joystick, joystick_split));
 
             Some(action)
         }

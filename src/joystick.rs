@@ -1,3 +1,4 @@
+use num::integer::gcd;
 use sdl2::joystick::Joystick;
 use serde::de;
 use serde::de::{Deserializer, Visitor};
@@ -22,6 +23,8 @@ pub struct JoystickInfo {
     pub guid: JoystickGuid,
     // NOTE: index is the second unique identifier for guid when there are collisions, mostly 0
     pub index: usize,
+    pub split: u32,
+    pub buttons: u32,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -81,11 +84,17 @@ impl JoystickInfo {
     pub fn new(joystick: &Joystick, index: usize) -> JoystickInfo {
         let instance_id = joystick.instance_id();
         let guid = JoystickGuid(joystick.guid().raw().data);
+        let axes = joystick.num_axes();
+        let buttons = joystick.num_buttons();
+        let hats = joystick.num_hats();
+        let split = gcd(gcd(axes / 2, hats), buttons);
 
         JoystickInfo {
             instance_id,
             guid,
             index,
+            split,
+            buttons,
         }
     }
 }
