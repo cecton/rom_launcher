@@ -21,8 +21,8 @@ const ENTITES: usize = 23;
 const TV_XRES: i32 = 256;
 const TV_YRES: i32 = 224;
 const AXIS_THRESOLD: i16 = 0x4fff;
-const JOYSTICK_LOCK_TIME: u32 = 100;
-const JOYSTICK_LOCK_TIME_AXIS: u32 = 200;
+const JOYSTICK_LOCK_TIME: u32 = 100; // TODO: longer lock?
+const JOYSTICK_LOCK_TIME_AXIS: u32 = 200; // TODO: longer lock?
 
 macro_rules! set_highlight {
     ($canvas:expr, $font:expr, $value:expr) => {
@@ -799,7 +799,9 @@ impl ROMLauncher {
         });
         app.sdl_context.mouse().show_cursor(false);
         let mut store = Store::new();
+        // TODO: unused_must_use
         ROMLauncher::load_state(&mut store);
+        // TODO: not loading the roms on empty state
         store.dispatch(Action::NextEmulator {
             timestamp: 0,
             step: 0,

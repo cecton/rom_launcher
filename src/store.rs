@@ -446,6 +446,7 @@ fn reduce(state: State, action: Action) -> State {
                         player.menu = Ready;
                     },
                     ConsoleControls => player.menu = GameControls,
+                    // TODO: skip if already empty
                     GameControls => player.menu = ClearConsoleControls,
                     ClearConsoleControls => player.menu = ControlsExit,
                     _ => {}
@@ -474,6 +475,7 @@ fn reduce(state: State, action: Action) -> State {
                     Ready => player.menu = Controls,
                     GameControls => player.menu = ConsoleControls,
                     ClearConsoleControls => player.menu = GameControls,
+                    // TODO: skip if already empty
                     ControlsExit => player.menu = ClearConsoleControls,
                     _ => {}
                 }
