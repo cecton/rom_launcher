@@ -31,7 +31,7 @@ pub struct State {
     pub rom_selected: i32,
     pub rom_count: i32,
     pub joysticks: HashMap<i32, JoystickInfo>,
-    pub last_joystick_action: HashMap<i32, u32>,
+    pub last_joystick_action: HashMap<(i32, u32), u32>,
     pub players: [Option<Player>; 10],
     pub console_configs: JoystickConfig,
     pub game_configs: JoystickConfig,
@@ -278,9 +278,9 @@ pub enum Action {
     NextPlayerMenu(u32, i32, u32),
     PrevPlayerMenu(u32, i32, u32),
     GoPlayerMenu(u32, i32, u32),
-    BindPlayerJoystickEvent(u32, usize, JoystickEvent), // TODO: take joystick split into account
-    UpdateJoystickLastAction(u32, i32), // TODO: take joystick split into account
-    BindEmulatorButton(u32, JoystickEvent), // TODO: take joystick split into account
+    BindPlayerJoystickEvent(u32, usize, JoystickEvent),
+    UpdateJoystickLastAction(u32, i32, u32),
+    BindEmulatorButton(u32, JoystickEvent),
     Quit,
 }
 
@@ -613,9 +613,9 @@ fn reduce(state: State, action: Action) -> State {
                 ..state
             }
         }
-        UpdateJoystickLastAction(timestamp, joystick_id) => {
+        UpdateJoystickLastAction(timestamp, joystick_id, split_index) => {
             let mut last_joystick_action = state.last_joystick_action;
-            last_joystick_action.insert(joystick_id, timestamp);
+            last_joystick_action.insert((joystick_id, split_index), timestamp);
 
             State {
                 timestamp,

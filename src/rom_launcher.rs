@@ -35,43 +35,38 @@ macro_rules! set_highlight {
 }
 
 macro_rules! lock_joystick {
-    ($joystick:expr, $timestamp:expr, $store:expr, $closure:expr) => {
+    ($joystick:expr, $split:expr, $timestamp:expr, $store:expr, $closure:expr) => {
         if $timestamp
             >= $store
                 .get_state()
                 .last_joystick_action
-                .get(&$joystick)
+                .get(&($joystick, $split))
                 .or(Some(&0))
                 .unwrap() + JOYSTICK_LOCK_TIME
         {
-            $store.dispatch(Action::UpdateJoystickLastAction($timestamp, $joystick));
+            $store.dispatch(Action::UpdateJoystickLastAction(
+                $timestamp, $joystick, $split,
+            ));
             $closure();
         }
     };
 }
 
 macro_rules! lock_joystick_axis {
-    ($joystick:expr, $timestamp:expr, $store:expr, $closure:expr) => {
+    ($joystick:expr, $split:expr, $timestamp:expr, $store:expr, $closure:expr) => {
         if $timestamp
             >= $store
                 .get_state()
                 .last_joystick_action
-                .get(&$joystick)
+                .get(&($joystick, $split))
                 .or(Some(&0))
                 .unwrap() + JOYSTICK_LOCK_TIME_AXIS
         {
-            $store.dispatch(Action::UpdateJoystickLastAction($timestamp, $joystick));
+            $store.dispatch(Action::UpdateJoystickLastAction(
+                $timestamp, $joystick, $split,
+            ));
             $closure();
         }
-    };
-}
-
-macro_rules! filter_player {
-    ($store:expr, $player_index:expr, $joystick:expr) => {
-        $store.get_state().players[$player_index]
-            .as_ref()
-            .unwrap()
-            .joystick == $joystick;
     };
 }
 
@@ -181,10 +176,15 @@ impl Entity for List {
             Event::JoyHatMotion {
                 state: HatState::Down,
                 which,
+                hat_idx,
                 timestamp,
                 ..
-            } => lock_joystick!(which, timestamp, store, || store
-                .dispatch(NextRom { timestamp, step: 1 })),
+            } => {
+                let split_index = hat_idx as u32;
+
+                lock_joystick!(which, split_index, timestamp, store, || store
+                    .dispatch(NextRom { timestamp, step: 1 }))
+            }
             Event::JoyAxisMotion {
                 axis_idx,
                 value,
@@ -193,18 +193,27 @@ impl Entity for List {
                 ..
             } if axis_idx % 2 == 1 && value >= AXIS_THRESOLD =>
             {
-                lock_joystick_axis!(which, timestamp, store, || store
+                let split_index = axis_idx as u32 / 2;
+
+                lock_joystick_axis!(which, split_index, timestamp, store, || store
                     .dispatch(NextRom { timestamp, step: 1 }))
             }
             Event::JoyHatMotion {
                 state: HatState::Up,
                 which,
+                hat_idx,
                 timestamp,
                 ..
-            } => lock_joystick!(which, timestamp, store, || store.dispatch(NextRom {
-                timestamp,
-                step: -1
-            })),
+            } => {
+                let split_index = hat_idx as u32;
+
+                lock_joystick!(which, split_index, timestamp, store, || store.dispatch(
+                    NextRom {
+                        timestamp,
+                        step: -1
+                    }
+                ))
+            }
             Event::JoyAxisMotion {
                 axis_idx,
                 value,
@@ -213,23 +222,32 @@ impl Entity for List {
                 ..
             } if axis_idx % 2 == 1 && value <= -AXIS_THRESOLD =>
             {
-                lock_joystick_axis!(which, timestamp, store, || store.dispatch(NextRom {
-                    timestamp,
-                    step: -1
-                }))
+                let split_index = axis_idx as u32 / 2;
+
+                lock_joystick_axis!(which, split_index, timestamp, store, || store.dispatch(
+                    NextRom {
+                        timestamp,
+                        step: -1
+                    }
+                ))
             }
             Event::JoyHatMotion {
                 state: HatState::Right,
                 which,
+                hat_idx,
                 timestamp,
                 ..
-            } => if rom_selected == -1 {
-                lock_joystick!(which, timestamp, store, || store
-                    .dispatch(NextEmulator { timestamp, step: 1 }))
-            } else {
-                lock_joystick!(which, timestamp, store, || store
-                    .dispatch(NextPage { timestamp, step: 1 }))
-            },
+            } => {
+                let split_index = hat_idx as u32;
+
+                if rom_selected == -1 {
+                    lock_joystick!(which, split_index, timestamp, store, || store
+                        .dispatch(NextEmulator { timestamp, step: 1 }))
+                } else {
+                    lock_joystick!(which, split_index, timestamp, store, || store
+                        .dispatch(NextPage { timestamp, step: 1 }))
+                }
+            }
             Event::JoyAxisMotion {
                 axis_idx,
                 value,
@@ -238,30 +256,41 @@ impl Entity for List {
                 ..
             } if axis_idx % 2 == 0 && value >= AXIS_THRESOLD =>
             {
+                let split_index = axis_idx as u32 / 2;
+
                 if rom_selected == -1 {
-                    lock_joystick!(which, timestamp, store, || store
+                    lock_joystick!(which, split_index, timestamp, store, || store
                         .dispatch(NextEmulator { timestamp, step: 1 }))
                 } else {
-                    lock_joystick!(which, timestamp, store, || store
+                    lock_joystick!(which, split_index, timestamp, store, || store
                         .dispatch(NextPage { timestamp, step: 1 }))
                 }
             }
             Event::JoyHatMotion {
                 state: HatState::Left,
                 which,
+                hat_idx,
                 timestamp,
                 ..
-            } => if rom_selected == -1 {
-                lock_joystick!(which, timestamp, store, || store.dispatch(NextEmulator {
-                    timestamp,
-                    step: -1
-                }))
-            } else {
-                lock_joystick!(which, timestamp, store, || store.dispatch(NextPage {
-                    timestamp,
-                    step: -1
-                }))
-            },
+            } => {
+                let split_index = hat_idx as u32;
+
+                if rom_selected == -1 {
+                    lock_joystick!(which, split_index, timestamp, store, || store.dispatch(
+                        NextEmulator {
+                            timestamp,
+                            step: -1
+                        }
+                    ))
+                } else {
+                    lock_joystick!(which, split_index, timestamp, store, || store.dispatch(
+                        NextPage {
+                            timestamp,
+                            step: -1
+                        }
+                    ))
+                }
+            }
             Event::JoyAxisMotion {
                 axis_idx,
                 value,
@@ -270,16 +299,22 @@ impl Entity for List {
                 ..
             } if axis_idx % 2 == 0 && value <= -AXIS_THRESOLD =>
             {
+                let split_index = axis_idx as u32 / 2;
+
                 if rom_selected == -1 {
-                    lock_joystick!(which, timestamp, store, || store.dispatch(NextEmulator {
-                        timestamp,
-                        step: -1
-                    }))
+                    lock_joystick!(which, split_index, timestamp, store, || store.dispatch(
+                        NextEmulator {
+                            timestamp,
+                            step: -1
+                        }
+                    ))
                 } else {
-                    lock_joystick!(which, timestamp, store, || store.dispatch(NextPage {
-                        timestamp,
-                        step: -1
-                    }))
+                    lock_joystick!(which, split_index, timestamp, store, || store.dispatch(
+                        NextPage {
+                            timestamp,
+                            step: -1
+                        }
+                    ))
                 }
             }
             Event::JoyButtonUp {
@@ -468,7 +503,8 @@ impl Entity for PlayerMenu {
                 button_idx,
                 timestamp,
                 ..
-            } => if player_joystick == which {
+            } if player_joystick == which =>
+            {
                 let split_index = {
                     let state = store.get_state();
                     let split_value =
@@ -486,7 +522,7 @@ impl Entity for PlayerMenu {
                         store.dispatch(GoPlayerMenu(timestamp, which, split_index));
                     }
                 }
-            },
+            }
             Event::JoyHatMotion {
                 hat_idx,
                 which,
@@ -511,11 +547,8 @@ impl Entity for PlayerMenu {
                 let split_index = axis_idx as u32 / 2;
 
                 if player_split == split_index {
-                    lock_joystick!(which, timestamp, store, || store.dispatch(NextPlayerMenu(
-                        timestamp,
-                        which,
-                        split_index
-                    )))
+                    lock_joystick!(which, split_index, timestamp, store, || store
+                        .dispatch(NextPlayerMenu(timestamp, which, split_index)))
                 }
             }
             Event::JoyHatMotion {
@@ -542,11 +575,8 @@ impl Entity for PlayerMenu {
                 let split_index = axis_idx as u32 / 2;
 
                 if player_split == split_index {
-                    lock_joystick!(which, timestamp, store, || store.dispatch(PrevPlayerMenu(
-                        timestamp,
-                        which,
-                        split_index
-                    )))
+                    lock_joystick!(which, split_index, timestamp, store, || store
+                        .dispatch(PrevPlayerMenu(timestamp, which, split_index)))
                 }
             }
             _ => {}
@@ -592,17 +622,31 @@ impl Entity for PlayerGrabInput {
         use self::JoystickEvent::*;
         use store::Action::*;
 
+        let (player_joystick, player_split) = store.get_state().players[self.player_index]
+            .as_ref()
+            .map(|x| (x.joystick, x.joystick_split))
+            .unwrap();
         match *event {
             Event::JoyButtonUp {
                 which,
                 button_idx,
                 timestamp,
                 ..
-            } if filter_player!(store, self.player_index, which) =>
+            } if player_joystick == which =>
             {
-                lock_joystick!(which, timestamp, store, || store.dispatch(
-                    BindPlayerJoystickEvent(timestamp, self.player_index, Button(button_idx))
-                ))
+                let split_index = {
+                    let state = store.get_state();
+                    let split_value =
+                        state.joysticks[&which].buttons / state.joysticks[&which].split;
+
+                    button_idx as u32 / split_value
+                };
+
+                if split_index == split_index {
+                    lock_joystick!(which, split_index, timestamp, store, || store.dispatch(
+                        BindPlayerJoystickEvent(timestamp, self.player_index, Button(button_idx))
+                    ))
+                }
             }
             Event::JoyHatMotion {
                 which,
@@ -610,26 +654,30 @@ impl Entity for PlayerGrabInput {
                 state,
                 timestamp,
                 ..
-            } if filter_player!(store, self.player_index, which)
+            } if player_joystick == which
                 && (state == HatState::Up || state == HatState::Down || state == HatState::Left
                     || state == HatState::Right) =>
             {
-                lock_joystick!(which, timestamp, store, || store.dispatch(
-                    BindPlayerJoystickEvent(
-                        timestamp,
-                        self.player_index,
-                        Hat(
-                            hat_idx,
-                            match state {
-                                HatState::Up => store::HatState::Up,
-                                HatState::Down => store::HatState::Down,
-                                HatState::Left => store::HatState::Left,
-                                HatState::Right => store::HatState::Right,
-                                _ => panic!("invalid state: {:?}", state),
-                            }
+                let split_index = hat_idx as u32;
+
+                if player_split == split_index {
+                    lock_joystick!(which, split_index, timestamp, store, || store.dispatch(
+                        BindPlayerJoystickEvent(
+                            timestamp,
+                            self.player_index,
+                            Hat(
+                                hat_idx,
+                                match state {
+                                    HatState::Up => store::HatState::Up,
+                                    HatState::Down => store::HatState::Down,
+                                    HatState::Left => store::HatState::Left,
+                                    HatState::Right => store::HatState::Right,
+                                    _ => panic!("invalid state: {:?}", state),
+                                }
+                            )
                         )
-                    )
-                ))
+                    ))
+                }
             }
             Event::JoyAxisMotion {
                 which,
@@ -637,23 +685,27 @@ impl Entity for PlayerGrabInput {
                 value,
                 timestamp,
                 ..
-            } if filter_player!(store, self.player_index, which)
+            } if player_joystick == which
                 && (value <= -AXIS_THRESOLD || value >= AXIS_THRESOLD) =>
             {
-                lock_joystick_axis!(which, timestamp, store, || store.dispatch(
-                    BindPlayerJoystickEvent(
-                        timestamp,
-                        self.player_index,
-                        Axis(
-                            axis_idx,
-                            if value.is_positive() {
-                                AxisState::Positive
-                            } else {
-                                AxisState::Negative
-                            }
+                let split_index = axis_idx as u32 / 2;
+
+                if player_split == split_index {
+                    lock_joystick_axis!(which, split_index, timestamp, store, || store.dispatch(
+                        BindPlayerJoystickEvent(
+                            timestamp,
+                            self.player_index,
+                            Axis(
+                                axis_idx,
+                                if value.is_positive() {
+                                    AxisState::Positive
+                                } else {
+                                    AxisState::Negative
+                                }
+                            )
                         )
-                    )
-                ))
+                    ))
+                }
             }
             _ => {}
         }
@@ -697,14 +749,25 @@ impl Entity for PlayerGrabEmulatorButtons {
         use self::JoystickEvent::*;
         use store::Action::*;
 
+        let (player_joystick, player_split) = store.get_state().players[0]
+            .as_ref()
+            .map(|x| (x.joystick, x.joystick_split))
+            .unwrap();
         match *event {
             Event::JoyButtonUp {
                 which,
                 button_idx,
                 timestamp,
                 ..
-            } if filter_player!(store, 0, which) =>
+            } if player_joystick == which =>
             {
+                let split_index = {
+                    let state = store.get_state();
+                    let split_value =
+                        state.joysticks[&which].buttons / state.joysticks[&which].split;
+
+                    button_idx as u32 / split_value
+                };
                 let hotkey = store.get_state().players[0]
                     .as_ref()
                     .unwrap()
@@ -713,7 +776,8 @@ impl Entity for PlayerGrabEmulatorButtons {
                     .unwrap()
                     .0
                     .clone();
-                lock_joystick!(which, timestamp, store, || {
+
+                lock_joystick!(which, split_index, timestamp, store, || {
                     let new_joystick_event = Button(button_idx);
 
                     if let Some(joystick_event) = hotkey {
