@@ -777,19 +777,21 @@ impl Entity for PlayerGrabEmulatorButtons {
                     .0
                     .clone();
 
-                lock_joystick!(which, split_index, timestamp, store, || {
-                    let new_joystick_event = Button(button_idx);
+                if player_split == split_index {
+                    lock_joystick!(which, split_index, timestamp, store, || {
+                        let new_joystick_event = Button(button_idx);
 
-                    if let Some(joystick_event) = hotkey {
-                        if joystick_event == new_joystick_event {
-                            return;
+                        if let Some(joystick_event) = hotkey {
+                            if joystick_event == new_joystick_event {
+                                return;
+                            }
+
+                            app.quit();
                         }
 
-                        app.quit();
-                    }
-
-                    store.dispatch(BindEmulatorButton(timestamp, new_joystick_event));
-                })
+                        store.dispatch(BindEmulatorButton(timestamp, new_joystick_event));
+                    })
+                }
             }
             _ => {}
         }

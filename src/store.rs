@@ -99,7 +99,6 @@ impl State {
 
     pub fn joystick_has_game_controls(&self, joystick_id: i32, split: u32) -> bool {
         let guid = &self.joysticks[&joystick_id].guid;
-        let emulator_id = &self.get_emulator().id;
         let rom = &self.get_rom().file_name;
 
         self.game_configs.contains_key(guid, &split, rom)
