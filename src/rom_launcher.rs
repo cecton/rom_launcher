@@ -866,9 +866,9 @@ impl ROMLauncher {
         });
         app.sdl_context.mouse().show_cursor(false);
         let mut store = Store::new();
-        // TODO: unused_must_use
-        ROMLauncher::load_state(&mut store);
-        // TODO: not loading the roms on empty state
+        if let Err(err) = Self::load_state(&mut store) {
+            error!("{}", err);
+        }
         store.dispatch(Action::NextEmulator {
             timestamp: 0,
             step: 0,
