@@ -89,6 +89,21 @@ impl State {
             .enumerate()
             .any(|(i, _)| self.player_needs_setup_controls(i))
     }
+
+    pub fn player_has_game_controls(&self, player_index: usize) -> bool {
+        match self.players[player_index].as_ref() {
+            Some(player) => self.joystick_has_game_controls(player.joystick, player.joystick_split),
+            None => false,
+        }
+    }
+
+    pub fn joystick_has_game_controls(&self, joystick_id: i32, split: u32) -> bool {
+        let guid = &self.joysticks[&joystick_id].guid;
+        let emulator_id = &self.get_emulator().id;
+        let rom = &self.get_rom().file_name;
+
+        self.game_configs.contains_key(guid, &split, rom)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -436,6 +451,7 @@ fn reduce(state: State, action: Action) -> State {
 
             let i = state.get_player_index(joystick_id, split);
             let player_needs_setup_controls = state.player_needs_setup_controls(i);
+            let player_has_game_controls = state.player_has_game_controls(i);
             let mut players = state.players;
             if let Some(player) = players[i].as_mut() {
                 match player.menu {
@@ -446,8 +462,11 @@ fn reduce(state: State, action: Action) -> State {
                         player.menu = Ready;
                     },
                     ConsoleControls => player.menu = GameControls,
-                    // TODO: skip if already empty
-                    GameControls => player.menu = ClearConsoleControls,
+                    GameControls => if player_has_game_controls {
+                        player.menu = ClearConsoleControls
+                    } else {
+                        player.menu = ControlsExit
+                    },
                     ClearConsoleControls => player.menu = ControlsExit,
                     _ => {}
                 }
@@ -464,6 +483,7 @@ fn reduce(state: State, action: Action) -> State {
 
             let i = state.get_player_index(joystick_id, split);
             let player_needs_setup_controls = state.player_needs_setup_controls(i);
+            let player_has_game_controls = state.player_has_game_controls(i);
             let mut players = state.players;
             if let Some(player) = players[i].as_mut() {
                 match player.menu {
@@ -475,8 +495,11 @@ fn reduce(state: State, action: Action) -> State {
                     Ready => player.menu = Controls,
                     GameControls => player.menu = ConsoleControls,
                     ClearConsoleControls => player.menu = GameControls,
-                    // TODO: skip if already empty
-                    ControlsExit => player.menu = ClearConsoleControls,
+                    ControlsExit => if player_has_game_controls {
+                        player.menu = ClearConsoleControls
+                    } else {
+                        player.menu = GameControls
+                    },
                     _ => {}
                 }
             }
@@ -512,7 +535,10 @@ fn reduce(state: State, action: Action) -> State {
                     ControlsExit => player.menu = Controls,
                     Leave => remove_player = Some(i),
                     ConsoleControls => player.grab_input = Some((Console, Vec::new())),
-                    ClearConsoleControls => clear_game_config = Some(player.joystick),
+                    ClearConsoleControls => {
+                        clear_game_config = Some(player.joystick);
+                        player.menu = ControlsExit;
+                    }
                     GameControls => player.grab_input = Some((Game, Vec::new())),
                 }
             );

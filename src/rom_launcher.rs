@@ -439,9 +439,12 @@ impl Entity for PlayerMenu {
                 resources.font.print(canvas, "Console");
                 set_highlight!(canvas, resources.font, player.menu == GameControls);
                 resources.font.print(canvas, "Game");
-                // TODO: black if already empty
+                if !state.player_has_game_controls(self.player_index) {
+                    resources.font.texture.set_color_mod(0, 0, 0);
+                }
                 set_highlight!(canvas, resources.font, player.menu == ClearConsoleControls);
                 resources.font.print(canvas, "Clear   ");
+                resources.font.texture.set_color_mod(255, 255, 255);
                 set_highlight!(canvas, resources.font, player.menu == ControlsExit);
                 resources.font.print(canvas, "Back");
             }
