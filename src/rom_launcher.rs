@@ -858,15 +858,7 @@ pub struct ROMLauncher {
 }
 
 impl ROMLauncher {
-    pub fn new() -> ROMLauncher {
-        let mut app = App::new(|video| {
-            video
-                .window("ROMLauncher", 800, 700)
-                .position(0, 0)
-                .borderless()
-                .build()
-        });
-        app.sdl_context.mouse().show_cursor(false);
+    pub fn new(mut app: App) -> ROMLauncher {
         let mut store = Store::new();
         if let Err(err) = Self::load_state(&mut store) {
             error!("{}", err);

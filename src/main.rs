@@ -21,15 +21,52 @@ mod joystick;
 mod rom_launcher;
 mod store;
 
-pub fn main() {
+#[cfg(debug_assertions)]
+fn initialize_logger() {
     let mut builder = Builder::from_default_env();
     builder.filter(None, LevelFilter::Debug).init();
+}
+
+#[cfg(not(debug_assertions))]
+fn initialize_logger() {
+    let mut builder = Builder::from_default_env();
+    builder.filter(None, LevelFilter::Info).init();
+}
+
+#[cfg(debug_assertions)]
+fn initialize_app() -> app::App {
+    let app = app::App::new(|video| {
+        video
+            .window("ROMLauncher", 800, 700)
+            .position(0, 0)
+            .borderless()
+            .build()
+    });
+    app
+}
+
+#[cfg(not(debug_assertions))]
+fn initialize_app() -> app::App {
+    let app = app::App::new(|video| {
+        video
+            .window("ROMLauncher", 640, 480)
+            .position(0, 0)
+            .fullscreen()
+            .build()
+    });
+    app.sdl_context.mouse().show_cursor(false);
+    app
+}
+
+pub fn main() {
+    initialize_logger();
     info!("starting up");
 
     let mut command;
     loop {
         {
-            let mut romlauncher = rom_launcher::ROMLauncher::new();
+            let app = initialize_app();
+            let mut romlauncher = rom_launcher::ROMLauncher::new(app);
             command = romlauncher.run_loop();
         }
 
