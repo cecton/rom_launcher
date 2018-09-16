@@ -43,7 +43,8 @@ impl App {
     }
 
     pub fn load_texture(&self, filepath: &str) -> Texture {
-        return self.texture_creator
+        return self
+            .texture_creator
             .load_texture(filepath)
             .expect(format!("Couldn't load texture file: {}", filepath).as_ref());
     }
@@ -68,7 +69,8 @@ impl App {
                     joystick.num_axes(),
                     joystick.num_hats()
                 );
-                let index = self.opened_joysticks
+                let index = self
+                    .opened_joysticks
                     .values()
                     .filter(|x| x.guid() == joystick.guid() && x.attached())
                     .count();

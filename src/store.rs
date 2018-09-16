@@ -53,8 +53,7 @@ impl State {
                 x.as_ref()
                     .map(|x| x.joystick == joystick_id && x.joystick_split == split)
                     == Some(true)
-            })
-            .unwrap()
+            }).unwrap()
     }
 
     pub fn get_rom(&self) -> &Rom {
@@ -191,7 +190,8 @@ impl JoystickConfig {
     }
 
     pub fn contains_key(&self, guid: &JoystickGuid, split: &u32, key: &str) -> bool {
-        self.0.contains_key(guid) && self.0[guid].contains_key(split)
+        self.0.contains_key(guid)
+            && self.0[guid].contains_key(split)
             && self.0[guid][split].contains_key(key)
     }
 
@@ -209,7 +209,8 @@ impl JoystickConfig {
             return None;
         }
 
-        let res = self.0
+        let res = self
+            .0
             .get_mut(&guid)
             .unwrap()
             .get_mut(&split)
@@ -843,25 +844,26 @@ fn get_roms(
         .filter(|x| {
             x.extension()
                 .map(|x| x.to_str().unwrap())
-                .map(|x| extensions.iter().any(|y| y == x)) == Some(true)
-        })
-        .filter(|x| {
+                .map(|x| extensions.iter().any(|y| y == x))
+                == Some(true)
+        }).filter(|x| {
             x.file_name()
                 .map(|x| x.to_str().unwrap())
-                .map(|x| exclude.iter().any(|y| y == x)) == Some(false)
-        })
-        .map(|x| Rom {
+                .map(|x| exclude.iter().any(|y| y == x))
+                == Some(false)
+        }).map(|x| Rom {
             path: x.to_str().unwrap().to_string(),
-            name: x.file_stem()
+            name: x
+                .file_stem()
                 .map(|x| x.to_str().unwrap())
                 .unwrap()
                 .to_string(),
-            file_name: x.file_name()
+            file_name: x
+                .file_name()
                 .map(|x| x.to_str().unwrap())
                 .unwrap()
                 .to_string(),
-        })
-        .collect::<Vec<_>>();
+        }).collect::<Vec<_>>();
     roms.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(roms)
