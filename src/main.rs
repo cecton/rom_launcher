@@ -49,9 +49,9 @@ fn initialize_app() -> app::App {
 fn initialize_app() -> app::App {
     let app = app::App::new(|video| {
         video
-            .window("ROMLauncher", 640, 480)
+            .window("ROMLauncher", 0, 0)
             .position(0, 0)
-            .fullscreen()
+            .fullscreen_desktop()
             .build()
     });
     app.sdl_context.mouse().show_cursor(false);

@@ -884,9 +884,9 @@ impl ROMLauncher {
             step: 0,
         });
 
-        debug!("setting up canvas...");
         let (w, h) = app.canvas.output_size().unwrap();
         let zoom = cmp::min(w as i32 / TV_XRES, h as i32 / TV_YRES) as f32;
+        debug!("setting up canvas (w: {}, h: {}, zoom: {})...", w, h, zoom);
         app.canvas.set_scale(zoom, zoom).unwrap();
 
         let mut viewport = app.canvas.viewport();
@@ -894,6 +894,10 @@ impl ROMLauncher {
         viewport.y = (viewport.h - TV_YRES) / 2;
         viewport.w = TV_XRES;
         viewport.h = TV_YRES;
+        debug!(
+            "viewport: {}x{}+{}+{}",
+            viewport.w, viewport.h, viewport.x, viewport.y
+        );
         app.canvas.set_viewport(viewport);
 
         let resources = Self::load_resources(&app);
