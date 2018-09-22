@@ -82,11 +82,16 @@ impl State {
             && !self.game_configs.contains_key(guid, &split, rom)
     }
 
-    pub fn any_player_needs_setup_controls(&self) -> bool {
+    pub fn all_players_are_ready(&self) -> bool {
         self.players
             .iter()
+            .skip(1)
+            .filter(|x| x.is_some())
             .enumerate()
-            .any(|(i, _)| self.player_needs_setup_controls(i))
+            .all(|(i, x)| {
+                x.as_ref().unwrap().menu == PlayerMenu::Waiting
+                    && !self.player_needs_setup_controls(i)
+            })
     }
 
     pub fn player_has_game_controls(&self, player_index: usize) -> bool {

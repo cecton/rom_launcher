@@ -25,11 +25,15 @@ const JOYSTICK_LOCK_TIME: u32 = 200; // TODO: longer lock?
 const JOYSTICK_LOCK_TIME_AXIS: u32 = 400; // TODO: longer lock?
 
 macro_rules! set_highlight {
-    ($canvas:expr, $font:expr, $value:expr) => {
+    ($canvas:expr, $font:expr, $value:expr, $text:expr) => {
         if $value {
-            $font.print($canvas, "  > ");
+            $font.print($canvas, "> ");
+            $font.print($canvas, $text);
+            $font.print($canvas, " <");
         } else {
-            $font.print($canvas, "    ");
+            $font.print($canvas, "  ");
+            $font.print($canvas, $text);
+            $font.print($canvas, "  ");
         }
     };
 }
@@ -451,48 +455,63 @@ impl Entity for PlayerMenu {
         );
         resources
             .font
-            .print(canvas, &format!("{:2}", actual_player_index + 1));
+            .print(canvas, &format!("{:2} ", actual_player_index + 1));
 
         match player.menu {
             Controls | Ready | Leave => {
-                set_highlight!(canvas, resources.font, player.menu == Controls);
-                resources.font.print(canvas, "Controls");
-                if (self.player_index == 0 && state.any_player_needs_setup_controls())
+                set_highlight!(canvas, resources.font, player.menu == Controls, "Controls");
+                if (self.player_index == 0 && !state.all_players_are_ready())
                     || state.player_needs_setup_controls(self.player_index)
                 {
                     resources.font.texture.set_color_mod(0, 0, 0);
                 }
-                set_highlight!(canvas, resources.font, player.menu == Ready);
-                if self.player_index == 0 {
-                    resources.font.print(canvas, "Start          ");
-                } else {
-                    resources.font.print(canvas, "Ready          ");
-                }
+                set_highlight!(
+                    canvas,
+                    resources.font,
+                    player.menu == Ready,
+                    if self.player_index == 0 {
+                        "Start"
+                    } else {
+                        "Ready"
+                    }
+                );
+                resources.font.print(canvas, "        ");
                 resources.font.texture.set_color_mod(255, 255, 255);
-                set_highlight!(canvas, resources.font, player.menu == Leave);
-                if self.player_index == 0 {
-                    resources.font.print(canvas, "Exit");
-                } else {
-                    resources.font.print(canvas, "Leave");
-                }
+                set_highlight!(
+                    canvas,
+                    resources.font,
+                    player.menu == Leave,
+                    if self.player_index == 0 {
+                        "Exit"
+                    } else {
+                        "Leave"
+                    }
+                );
             }
             ConsoleControls | GameControls | ClearConsoleControls | ControlsExit => {
-                set_highlight!(canvas, resources.font, player.menu == ConsoleControls);
-                resources.font.print(canvas, "Console");
-                set_highlight!(canvas, resources.font, player.menu == GameControls);
-                resources.font.print(canvas, "Game");
+                set_highlight!(
+                    canvas,
+                    resources.font,
+                    player.menu == ConsoleControls,
+                    "Console"
+                );
+                set_highlight!(canvas, resources.font, player.menu == GameControls, "Game");
                 if !state.player_has_game_controls(self.player_index) {
                     resources.font.texture.set_color_mod(0, 0, 0);
                 }
-                set_highlight!(canvas, resources.font, player.menu == ClearConsoleControls);
-                resources.font.print(canvas, "Clear   ");
+                set_highlight!(
+                    canvas,
+                    resources.font,
+                    player.menu == ClearConsoleControls,
+                    "Clear"
+                );
+                resources.font.print(canvas, " ");
                 resources.font.texture.set_color_mod(255, 255, 255);
-                set_highlight!(canvas, resources.font, player.menu == ControlsExit);
-                resources.font.print(canvas, "Back");
+                set_highlight!(canvas, resources.font, player.menu == ControlsExit, "Back");
             }
             Waiting => {
-                set_highlight!(canvas, resources.font, true);
-                resources.font.print(canvas, "Waiting");
+                resources.font.print(canvas, "   ");
+                set_highlight!(canvas, resources.font, true, "Waiting for other players...");
             }
         }
     }
@@ -610,6 +629,13 @@ impl Entity for PlayerGrabInput {
     fn render(&self, canvas: &mut Canvas<Window>, state: &State, resources: &mut Resources) {
         resources.font.set_line_spacing(1.50);
         let line_height = resources.font.line_height;
+        let actual_player_index = state
+            .players
+            .iter()
+            .take(self.player_index)
+            .filter(|x| x.is_some())
+            .count();
+
         resources.font.texture.set_color_mod(255, 255, 255);
         resources.font.set_pos(
             0,
@@ -623,9 +649,14 @@ impl Entity for PlayerGrabInput {
             .unwrap();
         let (_, ref input_display) =
             state.emulators[state.emulator_selected as usize].controls[controls.len()];
-        resources
-            .font
-            .print(canvas, &format!(" {} >", input_display));
+        resources.font.print(
+            canvas,
+            &format!(
+                "{:2}  Press button for:   {}",
+                actual_player_index + 1,
+                input_display
+            ),
+        );
     }
 
     fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) {
