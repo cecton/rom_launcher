@@ -459,15 +459,18 @@ fn reduce(state: State, action: Action) -> State {
             let i = state.get_player_index(joystick_id, split);
             let player_needs_setup_controls = state.player_needs_setup_controls(i);
             let player_has_game_controls = state.player_has_game_controls(i);
+            let all_players_are_ready = state.all_players_are_ready();
             let mut players = state.players;
             if let Some(player) = players[i].as_mut() {
                 match player.menu {
                     Ready => player.menu = Leave,
-                    Controls => if player_needs_setup_controls {
-                        player.menu = Leave;
-                    } else {
-                        player.menu = Ready;
-                    },
+                    Controls => {
+                        if player_needs_setup_controls || (i == 0 && !all_players_are_ready) {
+                            player.menu = Leave;
+                        } else {
+                            player.menu = Ready;
+                        }
+                    }
                     ConsoleControls => player.menu = GameControls,
                     GameControls => if player_has_game_controls {
                         player.menu = ClearConsoleControls
@@ -491,10 +494,11 @@ fn reduce(state: State, action: Action) -> State {
             let i = state.get_player_index(joystick_id, split);
             let player_needs_setup_controls = state.player_needs_setup_controls(i);
             let player_has_game_controls = state.player_has_game_controls(i);
+            let all_players_are_ready = state.all_players_are_ready();
             let mut players = state.players;
             if let Some(player) = players[i].as_mut() {
                 match player.menu {
-                    Leave => if player_needs_setup_controls {
+                    Leave => if player_needs_setup_controls || (i == 0 && !all_players_are_ready) {
                         player.menu = Controls;
                     } else {
                         player.menu = Ready;
