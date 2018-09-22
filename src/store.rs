@@ -444,6 +444,11 @@ fn reduce(state: State, action: Action) -> State {
                         grab_input: None,
                         grab_emulator_buttons: None,
                     });
+                    if let Some(ref mut first_player) = players[0] {
+                        if first_player.menu == PlayerMenu::Ready {
+                            first_player.menu = PlayerMenu::Leave;
+                        }
+                    }
 
                     State {
                         timestamp,
@@ -531,6 +536,7 @@ fn reduce(state: State, action: Action) -> State {
             let mut game_configs = state.game_configs;
             let mut remove_player = None;
             let mut clear_game_config = None;
+            let mut player_becomes_not_ready = false;
             modify_player!(
                 players,
                 joystick_id,
@@ -541,7 +547,10 @@ fn reduce(state: State, action: Action) -> State {
                     } else {
                         player.menu = Waiting;
                     },
-                    Waiting => player.menu = Ready,
+                    Waiting => {
+                        player.menu = Ready;
+                        player_becomes_not_ready = true;
+                    }
                     Controls => player.menu = ConsoleControls,
                     ControlsExit => player.menu = Controls,
                     Leave => remove_player = Some(i),
@@ -553,6 +562,14 @@ fn reduce(state: State, action: Action) -> State {
                     GameControls => player.grab_input = Some((Game, Vec::new())),
                 }
             );
+
+            if player_becomes_not_ready {
+                if let Some(ref mut first_player) = players[0] {
+                    if first_player.menu == PlayerMenu::Ready {
+                        first_player.menu = PlayerMenu::Leave;
+                    }
+                }
+            }
 
             match remove_player {
                 Some(0) => screen = Screen::List,
