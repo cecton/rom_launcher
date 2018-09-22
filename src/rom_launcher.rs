@@ -551,7 +551,7 @@ impl Entity for PlayerMenu {
                 timestamp,
                 ..
             }
-                if axis_idx % 2 == 0 && value >= AXIS_THRESOLD =>
+                if axis_idx % 2 == 0 && value >= AXIS_THRESOLD && player_joystick == which =>
             {
                 let split_index = axis_idx as u32 / 2;
 
@@ -580,7 +580,7 @@ impl Entity for PlayerMenu {
                 timestamp,
                 ..
             }
-                if axis_idx % 2 == 0 && value <= -AXIS_THRESOLD =>
+                if axis_idx % 2 == 0 && value <= -AXIS_THRESOLD && player_joystick == which =>
             {
                 let split_index = axis_idx as u32 / 2;
 
