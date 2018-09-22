@@ -50,7 +50,6 @@ fn initialize_app() -> app::App {
     let app = app::App::new(|video| {
         video
             .window("ROMLauncher", 0, 0)
-            .position(0, 0)
             .fullscreen_desktop()
             .build()
     });

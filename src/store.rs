@@ -315,6 +315,8 @@ fn reduce(state: State, action: Action) -> State {
         NextRom { timestamp, step } => {
             let max = if state.page_index < state.page_count - 1 {
                 PAGE_SIZE
+            } else if state.rom_count > 0 && state.rom_count % PAGE_SIZE == 0 {
+                PAGE_SIZE
             } else {
                 state.rom_count.wrapping_rem(PAGE_SIZE)
             };
@@ -696,7 +698,16 @@ impl Store {
                 id: "md".to_string(),
                 name: "Mega Drive".to_string(),
                 path: "~/md_roms".to_string(),
-                controls: vec![],
+                controls: vec![
+                    ("up".to_string(), "Up".to_string()),
+                    ("down".to_string(), "Down".to_string()),
+                    ("left".to_string(), "Left".to_string()),
+                    ("right".to_string(), "Right".to_string()),
+                    ("y".to_string(), "A".to_string()),
+                    ("b".to_string(), "B".to_string()),
+                    ("a".to_string(), "C".to_string()),
+                    ("start".to_string(), "Start".to_string()),
+                ],
                 command: vec!["retroarch".to_string()],
                 extensions: vec!["bin".to_string(), "smd".to_string()],
                 exclude: vec![],
