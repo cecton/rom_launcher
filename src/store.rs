@@ -1,3 +1,4 @@
+use dirs;
 use serde_json;
 use std;
 use std::collections::HashMap;
@@ -873,7 +874,7 @@ fn get_roms(
     extensions: &Vec<String>,
     exclude: &Vec<String>,
 ) -> Result<Vec<Rom>, String> {
-    let resolved_path = path.replace("~", std::env::home_dir().unwrap().to_str().unwrap());
+    let resolved_path = path.replace("~", dirs::home_dir().unwrap().to_str().unwrap());
     let mut roms = std::fs::read_dir(resolved_path)
         .or_else(|x| Err(format!("{}", x)))?
         .map(|x| x.unwrap().path())
