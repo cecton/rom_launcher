@@ -652,7 +652,7 @@ impl Entity for PlayerGrabInput {
         resources.font.print(
             canvas,
             &format!(
-                "{:2}  Press button for:   {}",
+                "{:2}   Press button for:   {}",
                 actual_player_index + 1,
                 input_display
             ),
