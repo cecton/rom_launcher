@@ -25,12 +25,14 @@ mod store;
 #[cfg(debug_assertions)]
 fn initialize_logger() {
     let mut builder = Builder::from_default_env();
+    builder.default_format_timestamp_nanos(true);
     builder.filter(None, LevelFilter::Debug).init();
 }
 
 #[cfg(not(debug_assertions))]
 fn initialize_logger() {
     let mut builder = Builder::from_default_env();
+    builder.default_format_timestamp_nanos(true);
     builder.filter(None, LevelFilter::Info).init();
 }
 
