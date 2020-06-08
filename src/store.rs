@@ -286,6 +286,7 @@ pub enum Action {
     UpdateJoystickLastAction(u32, i32, u32),
     BindEmulatorButton(u32, JoystickEvent),
     Quit,
+    Rerender(u32),
 }
 
 /// Reducer
@@ -324,7 +325,7 @@ fn reduce(state: State, action: Action) -> State {
                 PAGE_SIZE
             } else {
                 state.rom_count.wrapping_rem(PAGE_SIZE)
-            };
+            } + 1;
             let rom_selected = state.rom_selected + step;
 
             if state.roms.is_err() || rom_selected < -1 {
@@ -349,12 +350,29 @@ fn reduce(state: State, action: Action) -> State {
         }
         NextPage { timestamp, step } => {
             let page_index = state.page_index + step;
+            let rom_selected = if state.page_index == state.page_count - 1
+                && step == -1
+                && state.rom_selected == state.rom_count % PAGE_SIZE
+            {
+                PAGE_SIZE
+            } else if page_index == state.page_count - 1
+                && step == 1
+                && state.rom_selected == PAGE_SIZE
+            {
+                state.rom_count % PAGE_SIZE
+            } else if page_index == state.page_count - 1 && step == 1 {
+                state.rom_count % PAGE_SIZE - 1
+            } else {
+                state.rom_selected
+            };
+
             if state.roms.is_err() || page_index < 0 || page_index >= state.page_count {
                 state
             } else {
                 State {
                     timestamp,
                     page_index,
+                    rom_selected,
                     ..state
                 }
             }
@@ -683,6 +701,7 @@ fn reduce(state: State, action: Action) -> State {
             screen: Screen::List,
             ..state
         },
+        Rerender(timestamp) => State { timestamp, ..state },
     }
 }
 
@@ -858,11 +877,6 @@ fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
                 };
                 store.dispatch(LoadRoms { roms })
             }));
-            store.dispatch(NextRom { timestamp, step: 0 });
-
-            Some(action)
-        }
-        &NextPage { timestamp, .. } => {
             store.dispatch(NextRom { timestamp, step: 0 });
 
             Some(action)

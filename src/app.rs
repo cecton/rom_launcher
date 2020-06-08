@@ -1,7 +1,8 @@
+use sdl2::event::Event;
 use sdl2::image::LoadTexture;
 use sdl2::joystick::Joystick;
 use sdl2::render::{Canvas, Texture, TextureCreator};
-use sdl2::video::{Window, WindowBuildError, WindowContext};
+use sdl2::video::{DisplayMode, Window, WindowBuildError, WindowContext};
 use std::collections::HashMap;
 
 use crate::joystick::*;
@@ -14,6 +15,8 @@ pub struct App {
     pub canvas: Canvas<Window>,
     pub texture_creator: TextureCreator<WindowContext>,
     opened_joysticks: HashMap<i32, Joystick>,
+    pub display_mode: DisplayMode,
+    event_pump: sdl2::EventPump,
 }
 
 impl App {
@@ -27,8 +30,11 @@ impl App {
         let video = sdl_context.video().unwrap();
         let joystick = sdl_context.joystick().unwrap();
         let timer = sdl_context.timer().unwrap();
-        let canvas = build_window(video).unwrap().into_canvas().build().unwrap();
+        let window = build_window(video).unwrap();
+        let display_mode = window.display_mode().unwrap();
+        let canvas = window.into_canvas().build().unwrap();
         let texture_creator = canvas.texture_creator();
+        let event_pump = sdl_context.event_pump().unwrap();
 
         App {
             sdl_context,
@@ -38,6 +44,8 @@ impl App {
             canvas,
             texture_creator,
             opened_joysticks: HashMap::new(),
+            display_mode,
+            event_pump,
         }
     }
 
@@ -87,5 +95,13 @@ impl App {
     pub fn close_joystick(&mut self, which: i32) {
         self.opened_joysticks.remove(&which);
         info!("removed joystick");
+    }
+
+    pub fn wait_event(&mut self) -> Event {
+        self.event_pump.wait_event()
+    }
+
+    pub fn poll_event(&mut self) -> Option<Event> {
+        self.event_pump.poll_event()
     }
 }

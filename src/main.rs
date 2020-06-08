@@ -21,6 +21,7 @@ mod draw;
 mod joystick;
 mod rom_launcher;
 mod store;
+mod tearing;
 
 #[cfg(debug_assertions)]
 fn initialize_logger() {

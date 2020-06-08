@@ -16,6 +16,7 @@ use crate::app::*;
 use crate::draw::*;
 use crate::store;
 use crate::store::*;
+use crate::tearing::*;
 
 const ENTITES: usize = 23;
 const TV_XRES: i32 = 256;
@@ -155,10 +156,20 @@ impl Entity for List {
                 }
 
                 resources.font.println(canvas, "");
+                if state.rom_selected == PAGE_SIZE
+                    || (state.page_index == state.page_count - 1
+                        && state.rom_selected == state.rom_count % PAGE_SIZE)
+                {
+                    resources.font.texture.set_color_mod(255, 255, 0);
+                }
+                resources
+                    .font
+                    .print(canvas, &format!("{: <20}", "Tearing test",));
+                resources.font.texture.set_color_mod(255, 255, 255);
                 resources.font.println(
                     canvas,
                     &format!(
-                        "{: >42}",
+                        "  {: >20}",
                         &format!(
                             "Page {} of {} ({} roms)",
                             state.page_index + 1,
@@ -176,9 +187,13 @@ impl Entity for List {
     }
 
     #[allow(clippy::unnecessary_unwrap)]
-    fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) {
+    fn apply_event(&self, event: &Event, mut app: &mut App, store: &mut Store) {
         use store::Action::*;
-        let rom_selected = store.get_state().rom_selected;
+        let state = store.get_state();
+        let rom_selected = state.rom_selected;
+        let rom_count = state.rom_count;
+        let page_index = state.page_index;
+        let page_count = state.page_count;
 
         match *event {
             Event::JoyHatMotion {
@@ -340,7 +355,14 @@ impl Entity for List {
                 };
 
                 if split_index.is_some() && rom_selected > -1 {
-                    store.dispatch(LaunchGame(timestamp, which, split_index.unwrap()))
+                    if (page_index < page_count - 1 && rom_selected < PAGE_SIZE)
+                        || (page_index == page_count - 1 && rom_selected < rom_count % PAGE_SIZE)
+                    {
+                        store.dispatch(LaunchGame(timestamp, which, split_index.unwrap()));
+                    } else {
+                        tearing_test(&mut app);
+                        store.dispatch(Rerender(timestamp));
+                    }
                 }
             }
             _ => {}
@@ -1022,7 +1044,7 @@ impl ROMLauncher {
     pub fn run_loop(&mut self) -> Option<(Vec<String>, String, String)> {
         debug!("looping over events...");
         let mut rerender = true;
-        let mut event_pump = self.app.sdl_context.event_pump().unwrap();
+
         loop {
             let node_ids = self.collect_entities();
 
@@ -1030,7 +1052,7 @@ impl ROMLauncher {
                 self.render(&node_ids);
             }
 
-            let event = event_pump.wait_event();
+            let event = self.app.wait_event();
             rerender = self.apply_event(event, &node_ids);
 
             if !self.app.is_running() {
