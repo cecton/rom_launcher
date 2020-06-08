@@ -901,7 +901,7 @@ pub struct ROMLauncher {
     pub app: App,
     store: Store,
     resources: Resources,
-    tree: Tree<Box<Entity>>,
+    tree: Tree<Box<dyn Entity>>,
 }
 
 impl ROMLauncher {
@@ -960,10 +960,10 @@ impl ROMLauncher {
     }
 
     #[allow(unused_must_use)]
-    fn load_entites() -> Tree<Box<Entity>> {
+    fn load_entites() -> Tree<Box<dyn Entity>> {
         use id_tree::InsertBehavior::*;
 
-        let mut tree: Tree<Box<Entity>> = TreeBuilder::new().with_node_capacity(ENTITES).build();
+        let mut tree: Tree<Box<dyn Entity>> = TreeBuilder::new().with_node_capacity(ENTITES).build();
         let root_id = tree.insert(Node::new(Box::new(Root {})), AsRoot).unwrap();
         tree.insert(Node::new(Box::new(List {})), UnderNode(&root_id));
         let player_colors = [
@@ -1054,7 +1054,7 @@ impl ROMLauncher {
 
     pub fn prepare_config(&self) -> Option<(Vec<String>, String, String)> {
         use self::JoystickEvent::*;
-        use store::{AxisState, HatState};
+        use store::HatState;
         let state = self.store.get_state();
 
         if state.screen == store::Screen::GameLauncher {
@@ -1149,14 +1149,14 @@ fn save_state(store: &Store) -> Result<(), String> {
 }
 
 pub struct OnlyActiveTraversal<'a> {
-    tree: &'a Tree<Box<Entity>>,
+    tree: &'a Tree<Box<dyn Entity>>,
     data: VecDeque<NodeId>,
     state: &'a State,
 }
 
 impl<'a> OnlyActiveTraversal<'a> {
     pub fn new(
-        tree: &'a Tree<Box<Entity>>,
+        tree: &'a Tree<Box<dyn Entity>>,
         node_id: NodeId,
         state: &'a State,
     ) -> OnlyActiveTraversal<'a> {

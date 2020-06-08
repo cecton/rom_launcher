@@ -409,7 +409,7 @@ fn reduce(state: State, action: Action) -> State {
             }
         }
         LaunchGame(timestamp, ..) => {
-            let mut players = [None, None, None, None, None, None, None, None, None, None];
+            let players = [None, None, None, None, None, None, None, None, None, None];
 
             State {
                 timestamp,
@@ -687,7 +687,7 @@ pub struct Store {
 
 enum StoreAction {
     Simple(Action),
-    Thunk(Box<Fn(&mut Store)>),
+    Thunk(Box<dyn Fn(&mut Store)>),
 }
 
 impl Store {
@@ -764,7 +764,7 @@ impl Store {
         self.queue.push(StoreAction::Simple(action));
     }
 
-    pub fn dispatch_thunk(&mut self, f: Box<Fn(&mut Store)>) {
+    pub fn dispatch_thunk(&mut self, f: Box<dyn Fn(&mut Store)>) {
         debug!("enqueuing thunk action");
         self.queue.push(StoreAction::Thunk(f));
     }
