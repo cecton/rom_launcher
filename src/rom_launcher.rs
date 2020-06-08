@@ -199,9 +199,7 @@ impl Entity for List {
                 which,
                 timestamp,
                 ..
-            }
-                if axis_idx % 2 == 1 && value >= AXIS_THRESOLD =>
-            {
+            } if axis_idx % 2 == 1 && value >= AXIS_THRESOLD => {
                 let split_index = axis_idx as u32 / 2;
 
                 lock_joystick_axis!(which, split_index, timestamp, store, || store
@@ -229,9 +227,7 @@ impl Entity for List {
                 which,
                 timestamp,
                 ..
-            }
-                if axis_idx % 2 == 1 && value <= -AXIS_THRESOLD =>
-            {
+            } if axis_idx % 2 == 1 && value <= -AXIS_THRESOLD => {
                 let split_index = axis_idx as u32 / 2;
 
                 lock_joystick_axis!(which, split_index, timestamp, store, || store.dispatch(
@@ -264,9 +260,7 @@ impl Entity for List {
                 which,
                 timestamp,
                 ..
-            }
-                if axis_idx % 2 == 0 && value >= AXIS_THRESOLD =>
-            {
+            } if axis_idx % 2 == 0 && value >= AXIS_THRESOLD => {
                 let split_index = axis_idx as u32 / 2;
 
                 if rom_selected == -1 {
@@ -308,9 +302,7 @@ impl Entity for List {
                 which,
                 timestamp,
                 ..
-            }
-                if axis_idx % 2 == 0 && value <= -AXIS_THRESOLD =>
-            {
+            } if axis_idx % 2 == 0 && value <= -AXIS_THRESOLD => {
                 let split_index = axis_idx as u32 / 2;
 
                 if rom_selected == -1 {
@@ -531,9 +523,7 @@ impl Entity for PlayerMenu {
                 button_idx,
                 timestamp,
                 ..
-            }
-                if player_joystick == which =>
-            {
+            } if player_joystick == which => {
                 let split_index = {
                     let state = store.get_state();
                     let split_value =
@@ -558,22 +548,22 @@ impl Entity for PlayerMenu {
                 state: HatState::Right,
                 timestamp,
                 ..
-            } => if player_joystick == which {
-                let split_index = hat_idx as u32;
+            } => {
+                if player_joystick == which {
+                    let split_index = hat_idx as u32;
 
-                if player_split == split_index {
-                    store.dispatch(NextPlayerMenu(timestamp, which, split_index));
+                    if player_split == split_index {
+                        store.dispatch(NextPlayerMenu(timestamp, which, split_index));
+                    }
                 }
-            },
+            }
             Event::JoyAxisMotion {
                 axis_idx,
                 value,
                 which,
                 timestamp,
                 ..
-            }
-                if axis_idx % 2 == 0 && value >= AXIS_THRESOLD && player_joystick == which =>
-            {
+            } if axis_idx % 2 == 0 && value >= AXIS_THRESOLD && player_joystick == which => {
                 let split_index = axis_idx as u32 / 2;
 
                 if player_split == split_index {
@@ -587,22 +577,22 @@ impl Entity for PlayerMenu {
                 state: HatState::Left,
                 timestamp,
                 ..
-            } => if player_joystick == which {
-                let split_index = hat_idx as u32;
+            } => {
+                if player_joystick == which {
+                    let split_index = hat_idx as u32;
 
-                if player_split == split_index {
-                    store.dispatch(PrevPlayerMenu(timestamp, which, split_index));
+                    if player_split == split_index {
+                        store.dispatch(PrevPlayerMenu(timestamp, which, split_index));
+                    }
                 }
-            },
+            }
             Event::JoyAxisMotion {
                 axis_idx,
                 value,
                 which,
                 timestamp,
                 ..
-            }
-                if axis_idx % 2 == 0 && value <= -AXIS_THRESOLD && player_joystick == which =>
-            {
+            } if axis_idx % 2 == 0 && value <= -AXIS_THRESOLD && player_joystick == which => {
                 let split_index = axis_idx as u32 / 2;
 
                 if player_split == split_index {
@@ -675,9 +665,7 @@ impl Entity for PlayerGrabInput {
                 button_idx,
                 timestamp,
                 ..
-            }
-                if player_joystick == which =>
-            {
+            } if player_joystick == which => {
                 let split_index = {
                     let state = store.get_state();
                     let split_value =
@@ -698,12 +686,11 @@ impl Entity for PlayerGrabInput {
                 state,
                 timestamp,
                 ..
-            }
-                if player_joystick == which
-                    && (state == HatState::Up
-                        || state == HatState::Down
-                        || state == HatState::Left
-                        || state == HatState::Right) =>
+            } if player_joystick == which
+                && (state == HatState::Up
+                    || state == HatState::Down
+                    || state == HatState::Left
+                    || state == HatState::Right) =>
             {
                 let split_index = hat_idx as u32;
 
@@ -732,9 +719,8 @@ impl Entity for PlayerGrabInput {
                 value,
                 timestamp,
                 ..
-            }
-                if player_joystick == which
-                    && (value <= -AXIS_THRESOLD || value >= AXIS_THRESOLD) =>
+            } if player_joystick == which
+                && (value <= -AXIS_THRESOLD || value >= AXIS_THRESOLD) =>
             {
                 let split_index = axis_idx as u32 / 2;
 
@@ -807,9 +793,7 @@ impl Entity for PlayerGrabEmulatorButtons {
                 button_idx,
                 timestamp,
                 ..
-            }
-                if player_joystick == which =>
-            {
+            } if player_joystick == which => {
                 let split_index = {
                     let state = store.get_state();
                     let split_value =
@@ -965,7 +949,8 @@ impl ROMLauncher {
     fn load_entites() -> Tree<Box<dyn Entity>> {
         use id_tree::InsertBehavior::*;
 
-        let mut tree: Tree<Box<dyn Entity>> = TreeBuilder::new().with_node_capacity(ENTITES).build();
+        let mut tree: Tree<Box<dyn Entity>> =
+            TreeBuilder::new().with_node_capacity(ENTITES).build();
         let root_id = tree.insert(Node::new(Box::new(Root {})), AsRoot).unwrap();
         tree.insert(Node::new(Box::new(List {})), UnderNode(&root_id));
         let player_colors = [
@@ -984,7 +969,8 @@ impl ROMLauncher {
             .insert(
                 Node::new(Box::new(GameLauncher { player_colors })),
                 UnderNode(&root_id),
-            ).unwrap();
+            )
+            .unwrap();
         for player_index in 0..9 {
             tree.insert(
                 Node::new(Box::new(PlayerMenu { player_index })),
@@ -1094,7 +1080,8 @@ impl ROMLauncher {
                         state
                             .console_configs
                             .get(&guid, &player.joystick_split, &emulator_id)
-                    }).as_ref()
+                    })
+                    .as_ref()
                     .unwrap()
                     .iter()
                     .zip(emulator.controls.iter().map(|&(ref x, _)| x))

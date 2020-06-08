@@ -42,8 +42,7 @@ impl App {
     }
 
     pub fn load_texture(&self, filepath: &str) -> Texture {
-        self
-            .texture_creator
+        self.texture_creator
             .load_texture(filepath)
             .unwrap_or_else(|_| panic!("Couldn't load texture file: {}", filepath))
     }

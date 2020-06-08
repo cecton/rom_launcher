@@ -51,7 +51,8 @@ impl State {
                 x.as_ref()
                     .map(|x| x.joystick == joystick_id && x.joystick_split == split)
                     == Some(true)
-            }).unwrap()
+            })
+            .unwrap()
     }
 
     pub fn get_rom(&self) -> &Rom {
@@ -317,7 +318,9 @@ fn reduce(state: State, action: Action) -> State {
             }
         }
         NextRom { timestamp, step } => {
-            let max = if (state.page_index < state.page_count - 1) || (state.rom_count > 0 && state.rom_count % PAGE_SIZE == 0) {
+            let max = if (state.page_index < state.page_count - 1)
+                || (state.rom_count > 0 && state.rom_count % PAGE_SIZE == 0)
+            {
                 PAGE_SIZE
             } else {
                 state.rom_count.wrapping_rem(PAGE_SIZE)
@@ -475,11 +478,13 @@ fn reduce(state: State, action: Action) -> State {
                         }
                     }
                     ConsoleControls => player.menu = GameControls,
-                    GameControls => if player_has_game_controls {
-                        player.menu = ClearConsoleControls
-                    } else {
-                        player.menu = ControlsExit
-                    },
+                    GameControls => {
+                        if player_has_game_controls {
+                            player.menu = ClearConsoleControls
+                        } else {
+                            player.menu = ControlsExit
+                        }
+                    }
                     ClearConsoleControls => player.menu = ControlsExit,
                     _ => {}
                 }
@@ -501,19 +506,23 @@ fn reduce(state: State, action: Action) -> State {
             let mut players = state.players;
             if let Some(player) = players[i].as_mut() {
                 match player.menu {
-                    Leave => if player_needs_setup_controls || (i == 0 && !all_players_are_ready) {
-                        player.menu = Controls;
-                    } else {
-                        player.menu = Ready;
-                    },
+                    Leave => {
+                        if player_needs_setup_controls || (i == 0 && !all_players_are_ready) {
+                            player.menu = Controls;
+                        } else {
+                            player.menu = Ready;
+                        }
+                    }
                     Ready => player.menu = Controls,
                     GameControls => player.menu = ConsoleControls,
                     ClearConsoleControls => player.menu = GameControls,
-                    ControlsExit => if player_has_game_controls {
-                        player.menu = ClearConsoleControls
-                    } else {
-                        player.menu = GameControls
-                    },
+                    ControlsExit => {
+                        if player_has_game_controls {
+                            player.menu = ClearConsoleControls
+                        } else {
+                            player.menu = GameControls
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -540,11 +549,12 @@ fn reduce(state: State, action: Action) -> State {
                 joystick_id,
                 joystick_split,
                 |i: usize, player: &mut Player| match player.menu {
-                    Ready => if i == 0 {
-                        player.grab_emulator_buttons = Some((None, None));
-                    } else {
-                        player.menu = Waiting;
-                    },
+                    Ready =>
+                        if i == 0 {
+                            player.grab_emulator_buttons = Some((None, None));
+                        } else {
+                            player.menu = Waiting;
+                        },
                     Waiting => {
                         player.menu = Ready;
                         player_becomes_not_ready = true;
@@ -866,11 +876,7 @@ fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
     }
 }
 
-fn get_roms(
-    path: &str,
-    extensions: &[String],
-    exclude: &[String],
-) -> Result<Vec<Rom>, String> {
+fn get_roms(path: &str, extensions: &[String], exclude: &[String]) -> Result<Vec<Rom>, String> {
     let resolved_path = path.replace("~", dirs::home_dir().unwrap().to_str().unwrap());
     let mut roms = std::fs::read_dir(resolved_path)
         .or_else(|x| Err(format!("{}", x)))?
@@ -881,12 +887,14 @@ fn get_roms(
                 .map(|x| x.to_str().unwrap())
                 .map(|x| extensions.iter().any(|y| y == x))
                 == Some(true)
-        }).filter(|x| {
+        })
+        .filter(|x| {
             x.file_name()
                 .map(|x| x.to_str().unwrap())
                 .map(|x| exclude.iter().any(|y| y == x))
                 == Some(false)
-        }).map(|x| Rom {
+        })
+        .map(|x| Rom {
             path: x.to_str().unwrap().to_string(),
             name: x
                 .file_stem()
@@ -898,7 +906,8 @@ fn get_roms(
                 .map(|x| x.to_str().unwrap())
                 .unwrap()
                 .to_string(),
-        }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
     roms.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(roms)
