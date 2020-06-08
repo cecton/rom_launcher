@@ -25,6 +25,7 @@ mod store;
 #[cfg(debug_assertions)]
 fn initialize_logger() {
     let mut builder = Builder::from_default_env();
+
     builder.default_format_timestamp_nanos(true);
     builder.filter(None, LevelFilter::Debug).init();
 }
@@ -32,20 +33,20 @@ fn initialize_logger() {
 #[cfg(not(debug_assertions))]
 fn initialize_logger() {
     let mut builder = Builder::from_default_env();
+
     builder.default_format_timestamp_nanos(true);
     builder.filter(None, LevelFilter::Info).init();
 }
 
 #[cfg(debug_assertions)]
 fn initialize_app() -> app::App {
-    let app = app::App::new(|video| {
+    app::App::new(|video| {
         video
             .window("ROMLauncher", 800, 700)
             .position(0, 0)
             .borderless()
             .build()
-    });
-    app
+    })
 }
 
 #[cfg(not(debug_assertions))]

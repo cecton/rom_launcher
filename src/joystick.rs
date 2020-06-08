@@ -59,6 +59,7 @@ impl<'de> Visitor<'de> for JoystickGuidVisitor {
         formatter.write_str("hexadecimal string of 32 digits")
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn visit_str<E>(self, value: &str) -> Result<JoystickGuid, E>
     where
         E: de::Error,

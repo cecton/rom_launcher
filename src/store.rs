@@ -1,6 +1,3 @@
-use dirs;
-use serde_json;
-use std;
 use std::collections::HashMap;
 
 use crate::joystick::*;
@@ -179,9 +176,7 @@ impl JoystickConfig {
         key: String,
         mapping: Vec<JoystickEvent>,
     ) -> Option<Vec<JoystickEvent>> {
-        if !self.0.contains_key(&guid) {
-            self.0.insert(guid, HashMap::new());
-        }
+        self.0.entry(guid).or_insert_with(HashMap::new);
 
         if !self.0[&guid].contains_key(&split) {
             self.0.get_mut(&guid).unwrap().insert(split, HashMap::new());
@@ -195,6 +190,7 @@ impl JoystickConfig {
             .insert(key, mapping)
     }
 
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn contains_key(&self, guid: &JoystickGuid, split: &u32, key: &str) -> bool {
         self.0.contains_key(guid)
             && self.0[guid].contains_key(split)
@@ -223,17 +219,18 @@ impl JoystickConfig {
             .unwrap()
             .remove(&key);
 
-        if self.0[&guid][&split].len() == 0 {
+        if self.0[&guid][&split].is_empty() {
             self.0.get_mut(&guid).unwrap().remove(&split);
         }
 
-        if self.0[&guid].len() == 0 {
+        if self.0[&guid].is_empty() {
             self.0.remove(&guid);
         }
 
         res
     }
 
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn get(&self, guid: &JoystickGuid, split: &u32, key: &str) -> Option<&Vec<JoystickEvent>> {
         self.0
             .get(guid)
@@ -291,6 +288,7 @@ pub enum Action {
 }
 
 /// Reducer
+#[allow(clippy::cognitive_complexity)]
 fn reduce(state: State, action: Action) -> State {
     use self::Action::*;
 
@@ -304,9 +302,9 @@ fn reduce(state: State, action: Action) -> State {
             ..state
         },
         LoadRoms { roms } => {
-            let rom_count = match &roms {
-                &Err(_) => 0,
-                &Ok(ref roms) => roms.len() as i32,
+            let rom_count = match roms {
+                Err(_) => 0,
+                Ok(ref roms) => roms.len() as i32,
             };
 
             State {
@@ -319,14 +317,13 @@ fn reduce(state: State, action: Action) -> State {
             }
         }
         NextRom { timestamp, step } => {
-            let max = if state.page_index < state.page_count - 1 {
-                PAGE_SIZE
-            } else if state.rom_count > 0 && state.rom_count % PAGE_SIZE == 0 {
+            let max = if (state.page_index < state.page_count - 1) || (state.rom_count > 0 && state.rom_count % PAGE_SIZE == 0) {
                 PAGE_SIZE
             } else {
                 state.rom_count.wrapping_rem(PAGE_SIZE)
             };
             let rom_selected = state.rom_selected + step;
+
             if state.roms.is_err() || rom_selected < -1 {
                 State {
                     timestamp,
@@ -871,8 +868,8 @@ fn trigger_middleware(store: &mut Store, action: Action) -> Option<Action> {
 
 fn get_roms(
     path: &str,
-    extensions: &Vec<String>,
-    exclude: &Vec<String>,
+    extensions: &[String],
+    exclude: &[String],
 ) -> Result<Vec<Rom>, String> {
     let resolved_path = path.replace("~", dirs::home_dir().unwrap().to_str().unwrap());
     let mut roms = std::fs::read_dir(resolved_path)

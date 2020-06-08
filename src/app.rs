@@ -1,4 +1,3 @@
-use sdl2;
 use sdl2::image::LoadTexture;
 use sdl2::joystick::Joystick;
 use sdl2::render::{Canvas, Texture, TextureCreator};
@@ -31,7 +30,7 @@ impl App {
         let canvas = build_window(video).unwrap().into_canvas().build().unwrap();
         let texture_creator = canvas.texture_creator();
 
-        return App {
+        App {
             sdl_context,
             joystick,
             timer,
@@ -39,18 +38,18 @@ impl App {
             canvas,
             texture_creator,
             opened_joysticks: HashMap::new(),
-        };
+        }
     }
 
     pub fn load_texture(&self, filepath: &str) -> Texture {
-        return self
+        self
             .texture_creator
             .load_texture(filepath)
-            .expect(format!("Couldn't load texture file: {}", filepath).as_ref());
+            .unwrap_or_else(|_| panic!("Couldn't load texture file: {}", filepath))
     }
 
     pub fn is_running(&self) -> bool {
-        return self.running;
+        self.running
     }
 
     pub fn quit(&mut self) {

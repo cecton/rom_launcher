@@ -128,8 +128,8 @@ impl Entity for List {
         resources.font.println(canvas, "");
 
         resources.font.texture.set_color_mod(255, 255, 255);
-        match &state.roms {
-            &Ok(ref roms) => {
+        match state.roms {
+            Ok(ref roms) => {
                 for (i, rom) in roms
                     .iter()
                     .skip((state.page_index * PAGE_SIZE) as usize)
@@ -168,13 +168,14 @@ impl Entity for List {
                     ),
                 );
             }
-            &Err(ref err) => {
+            Err(ref err) => {
                 resources.font.texture.set_color_mod(255, 0, 0);
                 resources.font.println(canvas, &err);
             }
         }
     }
 
+    #[allow(clippy::unnecessary_unwrap)]
     fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) {
         use store::Action::*;
         let rom_selected = store.get_state().rom_selected;
@@ -382,6 +383,7 @@ impl Entity for GameLauncher {
     fn apply_event(&self, event: &Event, _app: &mut App, store: &mut Store) {
         use store::Action::*;
 
+        #[allow(clippy::single_match)]
         match *event {
             Event::JoyButtonUp {
                 which,
@@ -684,7 +686,7 @@ impl Entity for PlayerGrabInput {
                     button_idx as u32 / split_value
                 };
 
-                if split_index == split_index {
+                if player_split == split_index {
                     lock_joystick!(which, split_index, timestamp, store, || store.dispatch(
                         BindPlayerJoystickEvent(timestamp, self.player_index, Button(button_idx))
                     ))
@@ -1001,7 +1003,7 @@ impl ROMLauncher {
         tree
     }
 
-    pub fn render(&mut self, node_ids: &Vec<NodeId>) {
+    pub fn render(&mut self, node_ids: &[NodeId]) {
         debug!("rerender");
 
         let state = self.store.get_state();
@@ -1014,20 +1016,21 @@ impl ROMLauncher {
         self.app.canvas.present();
     }
 
-    pub fn apply_event(&mut self, event: Event, node_ids: &Vec<NodeId>) -> bool {
+    pub fn apply_event(&mut self, event: Event, node_ids: &[NodeId]) -> bool {
         for node in node_ids {
             let entity = self.tree.get(&node).unwrap().data();
 
             entity.apply_event(&event, &mut self.app, &mut self.store);
         }
 
-        return self.store.process();
+        self.store.process()
     }
 
     pub fn collect_entities(&self) -> Vec<NodeId> {
         let root_id = self.tree.root_node_id().unwrap().clone();
         let state = self.store.get_state();
-        return OnlyActiveTraversal::new(&self.tree, root_id, state).collect();
+
+        OnlyActiveTraversal::new(&self.tree, root_id, state).collect()
     }
 
     pub fn run_loop(&mut self) -> Option<(Vec<String>, String, String)> {
@@ -1133,15 +1136,16 @@ impl ROMLauncher {
 impl Drop for ROMLauncher {
     fn drop(&mut self) {
         info!("exiting...");
-        if let Err(err) = save_state(&mut self.store) {
+        if let Err(err) = save_state(&self.store) {
             error!("could not write to save_sate: {}", err);
         }
     }
 }
 
 fn save_state(store: &Store) -> Result<(), String> {
-    let serialized_state = store.dump().map_err(|x| format!("{}", x))?;
-    let mut file = File::create("state.json").map_err(|x| format!("{}", x))?;
+    let serialized_state = store.dump()?;
+    let mut file = File::create("state.json").map_err(|x| x.to_string())?;
+
     file.write_all(serialized_state.as_slice())
         .map_err(|x| format!("{}", x))?;
 
