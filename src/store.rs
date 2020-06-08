@@ -3,7 +3,7 @@ use serde_json;
 use std;
 use std::collections::HashMap;
 
-use joystick::*;
+use crate::joystick::*;
 
 pub const PAGE_SIZE: i32 = 15;
 

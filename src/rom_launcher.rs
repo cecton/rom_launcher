@@ -12,10 +12,10 @@ use std::fs::File;
 use std::io;
 use std::io::prelude::*;
 
-use app::*;
-use draw::*;
-use store;
-use store::*;
+use crate::app::*;
+use crate::draw::*;
+use crate::store;
+use crate::store::*;
 
 const ENTITES: usize = 23;
 const TV_XRES: i32 = 256;

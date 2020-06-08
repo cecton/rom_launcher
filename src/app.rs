@@ -5,7 +5,7 @@ use sdl2::render::{Canvas, Texture, TextureCreator};
 use sdl2::video::{Window, WindowBuildError, WindowContext};
 use std::collections::HashMap;
 
-use joystick::*;
+use crate::joystick::*;
 
 pub struct App {
     pub sdl_context: sdl2::Sdl,

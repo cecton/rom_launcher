@@ -2,7 +2,7 @@
 name = "rom_launcher"
 version = "0.1.0"
 authors = ["Cecile Tonglet <cecile.tonglet@gmail.com>"]
-build = "build.rs"
+edition = "2018"
 
 [dependencies]
 sdl2 = { version = "0.31", features = ["image", "unsafe_textures"] }
