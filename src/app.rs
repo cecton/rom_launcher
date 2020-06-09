@@ -28,11 +28,10 @@ impl App {
         sdl2::image::init(sdl2::image::INIT_PNG).unwrap();
         let sdl_context = sdl2::init().unwrap();
         let video = sdl_context.video().unwrap();
+        let display_mode = video.desktop_display_mode(0).unwrap();
         let joystick = sdl_context.joystick().unwrap();
         let timer = sdl_context.timer().unwrap();
-        let window = build_window(video).unwrap();
-        let display_mode = window.display_mode().unwrap();
-        let canvas = window.into_canvas().build().unwrap();
+        let canvas = build_window(video).unwrap().into_canvas().build().unwrap();
         let texture_creator = canvas.texture_creator();
         let event_pump = sdl_context.event_pump().unwrap();
 
