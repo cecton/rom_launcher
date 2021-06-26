@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 sdl2 = { version = "0.31", features = ["image", "unsafe_textures"] }
 log = "0.4"
-env_logger = "0.5.12"
+env_logger = "0.8.4"
 id_tree = "1.2.0"
 serde = "1.0.45"
 serde_derive = "1.0.45"

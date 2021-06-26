@@ -25,18 +25,22 @@ mod tearing;
 
 #[cfg(debug_assertions)]
 fn initialize_logger() {
-    let mut builder = Builder::from_default_env();
+    let mut builder = Builder::new();
 
-    builder.default_format_timestamp_nanos(true);
-    builder.filter(None, LevelFilter::Debug).init();
+    builder.filter_level(LevelFilter::Debug);
+    builder.format_timestamp_nanos();
+    builder.parse_default_env();
+    builder.init();
 }
 
 #[cfg(not(debug_assertions))]
 fn initialize_logger() {
-    let mut builder = Builder::from_default_env();
+    let mut builder = Builder::new();
 
-    builder.default_format_timestamp_nanos(true);
-    builder.filter(None, LevelFilter::Info).init();
+    builder.filter_level(LevelFilter::Info);
+    builder.format_timestamp_nanos();
+    builder.parse_default_env();
+    builder.init();
 }
 
 #[cfg(debug_assertions)]
